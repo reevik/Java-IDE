@@ -1,0 +1,75 @@
+name: Release DMG
+
+# Cut a release by pushing a version tag:
+#     git tag v0.1.0 && git push origin v0.1.0
+# You can also run it manually from the Actions tab (workflow_dispatch),
+# which produces a prerelease named after the run number.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Needed so tauri-action can create the release and upload the DMG.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest # Apple-Silicon runner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both targets so we can ship a universal (Intel + Apple Silicon) DMG.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Prepare App Store Connect API key
+        run: |
+          mkdir -p ~/private_keys
+          echo "${{ secrets.APPLE_API_KEY_P8 }}" | base64 --decode > ~/private_keys/AuthKey_${{ secrets.APPLE_API_KEY }}.p8
+
+      - name: Build app and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Developer ID cert: tauri-action imports this into a temp keychain.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Notarization via App Store Connect API key (scoped, independently revocable).
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ~/private_keys/AuthKey_${{ secrets.APPLE_API_KEY }}.p8
+        with:
+          # Universal binary → one DMG that runs on Intel and Apple Silicon.
+          # For a faster, Apple-Silicon-only build, drop this line.
+          args: --target universal-apple-darwin
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v0.0.0-dev.{0}', github.run_number) }}
+          releaseName: Reevik Java ADE ${{ github.ref_type == 'tag' && github.ref_name || format('dev build {0}', github.run_number) }}
+          releaseBody: |
+            Automated macOS build.
+
+            Universal DMG (Intel + Apple Silicon), signed with a Developer ID
+            certificate and notarized by Apple. Download, open the DMG, and drag
+            **Reevik Java ADE** to Applications — no Gatekeeper warning, no `xattr` workaround.
+          releaseDraft: false
+          # Mark manual runs and semver pre-releases (v1.2.3-alpha, -beta, -rc) as prereleases.
+          prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}

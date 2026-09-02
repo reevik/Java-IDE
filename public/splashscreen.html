@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Starting Reevik Java ADE…</title>
+    <style>
+      :root {
+        --accent: #e4551f;
+        --accent-2: #ff8a3d;
+        --card: rgba(255, 255, 255, 0.9);
+        --border: rgba(0, 0, 0, 0.08);
+        --text: #1d1d1f;
+        --text-2: #6b6b73;
+        --track: rgba(0, 0, 0, 0.08);
+        --shadow: rgba(0, 0, 0, 0.28);
+      }
+      :root[data-theme="dark"] {
+        --card: rgba(30, 32, 38, 0.92);
+        --border: rgba(255, 255, 255, 0.1);
+        --text: #ececef;
+        --text-2: #9a9aa4;
+        --track: rgba(255, 255, 255, 0.1);
+        --shadow: rgba(0, 0, 0, 0.5);
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%; background: transparent; overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+        -webkit-font-smoothing: antialiased;
+        user-select: none; cursor: default;
+      }
+      body { display: flex; align-items: center; justify-content: center; padding: 14px; }
+
+      .card {
+        position: relative;
+        width: 100%; height: 100%;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 16px;
+        border-radius: 20px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        -webkit-backdrop-filter: blur(30px) saturate(180%);
+        backdrop-filter: blur(30px) saturate(180%);
+        box-shadow: 0 18px 50px -12px var(--shadow);
+        overflow: hidden;
+      }
+      /* A soft accent glow behind the logo. */
+      .card::before {
+        content: ""; position: absolute; top: -60px; left: 50%;
+        width: 260px; height: 200px; transform: translateX(-50%);
+        background: radial-gradient(closest-side, rgba(228, 85, 31, 0.22), transparent 70%);
+        pointer-events: none;
+      }
+
+      .logo {
+        width: 84px; height: 84px;
+        display: block;
+        object-fit: contain;
+        filter: drop-shadow(0 8px 20px rgba(228, 85, 31, 0.4));
+      }
+
+      .title { font-size: 22px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+      .subtitle { font-size: 12px; color: var(--text-2); margin-top: -10px; }
+
+      .track {
+        width: 210px; height: 4px; border-radius: 4px;
+        background: var(--track); overflow: hidden; position: relative;
+      }
+      .bar {
+        position: absolute; top: 0; left: 0; height: 100%; width: 40%; border-radius: 4px;
+        background: linear-gradient(90deg, var(--accent-2), var(--accent));
+        animation: slide 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+      @keyframes slide {
+        0%   { left: -42%; width: 42%; }
+        50%  { width: 58%; }
+        100% { left: 100%; width: 42%; }
+      }
+
+      .status { font-size: 11px; color: var(--text-2); height: 14px; }
+      .version {
+        position: absolute; bottom: 12px; right: 14px;
+        font-size: 10px; color: var(--text-2); opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <svg class="logo" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Reevik Java ADE">
+        <defs>
+          <linearGradient id="ra-bg" gradientUnits="userSpaceOnUse" x1="0" y1="72" x2="0" y2="936">
+            <stop offset="0" stop-color="#FF8A3D"/><stop offset="0.55" stop-color="#E4551F"/><stop offset="1" stop-color="#C1400E"/>
+          </linearGradient>
+          <linearGradient id="ra-sheen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+          </linearGradient>
+          <clipPath id="ra-badge"><rect x="80" y="72" width="864" height="864" rx="200"/></clipPath>
+        </defs>
+        <rect x="80" y="72" width="864" height="864" rx="200" fill="url(#ra-bg)"/>
+        <rect x="80" y="72" width="864" height="864" rx="200" fill="url(#ra-sheen)" clip-path="url(#ra-badge)"/>
+        <rect x="81.5" y="73.5" width="861" height="861" rx="198.5" fill="none" stroke="#ffffff" stroke-opacity="0.45" stroke-width="3"/>
+        <g clip-path="url(#ra-badge)">
+          <g transform="translate(143 143) scale(11.52)" fill="#ffffff">
+            <g transform="matrix(1,0,0,1,-1024,-256)">
+              <g transform="matrix(0.866025,0.5,-0.5,0.866025,589.93,-387.292)">
+                <g transform="matrix(1,0,0,1,0,-0.699553)"><path d="M737.673,328.231C738.494,328.056 739.334,328.427 739.757,329.152C739.955,329.463 740.106,329.722 740.106,329.722C740.106,329.722 745.206,338.581 739.429,352.782C737.079,358.559 736.492,366.083 738.435,371.679C738.697,372.426 738.482,373.258 737.89,373.784C737.298,374.31 736.447,374.426 735.735,374.077C730.192,371.375 722.028,365.058 722.021,352C722.015,340.226 728.812,330.279 737.673,328.231ZM737.049,332.302C730.104,335.24 726.021,342.847 726.021,352C726.021,359.27 730.203,365.111 734.111,368.315C733.195,363.785 733.062,357.818 735.724,351.274C739.116,342.936 737.912,335.324 737.049,332.302Z"/></g>
+                <g transform="matrix(-1,0,0,-1,1483.03,703.293)"><path d="M737.609,328.246C738.465,328.06 739.344,328.446 739.785,329.203C739.97,329.49 740.106,329.722 740.106,329.722C740.106,329.722 745.206,338.581 739.429,352.782C737.1,358.507 736.503,365.948 738.383,371.527C738.646,372.304 738.415,373.164 737.796,373.703C737.177,374.243 736.294,374.356 735.56,373.989C730.02,371.241 722.028,364.92 722.021,352C722.016,340.255 728.779,330.328 737.609,328.246ZM737.049,332.302C730.104,335.24 726.021,342.847 726.021,352C726.021,359.27 730.203,365.111 734.111,368.315C733.195,363.785 733.062,357.818 735.724,351.274C739.116,342.936 737.912,335.324 737.049,332.302Z"/></g>
+              </g>
+            </g>
+          </g>
+        </g>
+      </svg>
+      <div class="title">Reevik Java ADE</div>
+      <div class="subtitle">Augmented Development Environment</div>
+      <div class="track"><div class="bar"></div></div>
+      <div class="status" id="status">Starting…</div>
+      <div class="version" id="version"></div>
+    </div>
+
+    <script>
+      // Match the app's saved appearance so the splash doesn't flash the wrong theme.
+      (function () {
+        try {
+          var a = localStorage.getItem("appearance") || "system";
+          var dark = a === "dark" || (a === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (_) {}
+      })();
+
+      var statusEl = document.getElementById("status");
+
+      // Cosmetic fallback: cycle through generic steps until the main window sends
+      // a real status via the `splash:status` event (then we stop cycling).
+      var steps = ["Loading preferences…", "Restoring projects…", "Preparing workspace…"];
+      var i = 0, gotReal = false;
+      var timer = setInterval(function () {
+        if (gotReal) return;
+        statusEl.textContent = steps[i % steps.length];
+        i++;
+      }, 700);
+
+      // Listen for real bootstrap progress + the version, if Tauri globals are present.
+      try {
+        var T = window.__TAURI__;
+        if (T && T.event) {
+          T.event.listen("splash:status", function (e) {
+            gotReal = true;
+            if (e && e.payload) statusEl.textContent = String(e.payload);
+          });
+        }
+        if (T && T.core) {
+          T.core.invoke("app_version").then(function (v) {
+            document.getElementById("version").textContent = "v" + v;
+          }).catch(function () {});
+        }
+      } catch (_) {}
+    </script>
+  </body>
+</html>
