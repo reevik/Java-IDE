@@ -1311,8 +1311,13 @@ export default function App() {
     };
   }, []);
 
-  // ⌘⇧P into the palette, ⌘⇧F into find-in-files (menu items carry only ⌘K).
+  // ⌘⇧P palette, ⌘⇧F find-in-files, plus command shortcuts (⌘⇧A review,
+  // ⌘⇧B code analysis) that only appear as hints in the palette otherwise.
   useEffect(() => {
+    const runCmd = (id: string) => {
+      const c = commandsRef.current.find((x) => x.id === id);
+      if (c && !c.disabled) c.run();
+    };
     const h = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
       const key = e.key.toLowerCase();
@@ -1322,6 +1327,12 @@ export default function App() {
       } else if (key === "f") {
         e.preventDefault();
         setShowSearch(true);
+      } else if (key === "a") {
+        e.preventDefault();
+        runCmd("ai.review");
+      } else if (key === "b") {
+        e.preventDefault();
+        runCmd("cargo.check");
       }
     };
     window.addEventListener("keydown", h);
