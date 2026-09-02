@@ -1803,6 +1803,57 @@ pub fn toolchain_info() -> ToolchainInfo {
     ToolchainInfo { dir, java, javac, version, vendor, java_home }
 }
 
+/// One JDK installed on the machine, for the Settings → Java picker.
+#[derive(serde::Serialize)]
+pub struct JdkInfo {
+    /// e.g. "OpenJDK 23.0.2".
+    pub name: String,
+    pub version: String,
+    pub vendor: String,
+    pub arch: String,
+    /// JAVA_HOME of this JDK.
+    pub home: String,
+    /// Its `bin` directory — what we store as the toolchain override.
+    pub bin: String,
+}
+
+/// Enumerate the JDKs installed on this machine via `/usr/libexec/java_home -X`
+/// (macOS). Returns an empty list on other platforms or when none are found.
+#[tauri::command]
+pub fn detected_jdks() -> Vec<JdkInfo> {
+    let out = std::process::Command::new("/usr/libexec/java_home").arg("-X").output();
+    let text = match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => return Vec::new(),
+    };
+    let mut jdks = Vec::new();
+    for chunk in text.split("<dict>").skip(1) {
+        let dict = chunk.split("</dict>").next().unwrap_or("");
+        let home = plist_string(dict, "JVMHomePath").unwrap_or_default();
+        if home.is_empty() {
+            continue;
+        }
+        jdks.push(JdkInfo {
+            name: plist_string(dict, "JVMName").unwrap_or_default(),
+            version: plist_string(dict, "JVMVersion").unwrap_or_default(),
+            vendor: plist_string(dict, "JVMVendor").unwrap_or_default(),
+            arch: plist_string(dict, "JVMArch").unwrap_or_default(),
+            bin: format!("{home}/bin"),
+            home,
+        });
+    }
+    jdks
+}
+
+/// The `<string>` value following `<key>KEY</key>` in a plist `<dict>` fragment.
+fn plist_string(dict: &str, key: &str) -> Option<String> {
+    let k = format!("<key>{key}</key>");
+    let after = &dict[dict.find(&k)? + k.len()..];
+    let s = after.find("<string>")? + "<string>".len();
+    let e = after[s..].find("</string>")? + s;
+    Some(after[s..e].trim().to_string())
+}
+
 /// A discovered (or missing) external tool the IDE relies on.
 #[derive(serde::Serialize)]
 pub struct ToolInfo {

@@ -336,6 +336,20 @@ export function toolchainInfo(): Promise<ToolchainInfo> {
   return invoke("toolchain_info");
 }
 
+export interface JdkInfo {
+  name: string;
+  version: string;
+  vendor: string;
+  arch: string;
+  home: string;
+  bin: string;
+}
+
+/** JDKs installed on the machine (macOS `/usr/libexec/java_home`). */
+export function detectedJdks(): Promise<JdkInfo[]> {
+  return invoke("detected_jdks");
+}
+
 /** Review a Rust file; partial output streams via `ai:review-progress`. */
 export function reviewCode(path: string, code: string): Promise<Review> {
   return invoke("review_code", { path, code });

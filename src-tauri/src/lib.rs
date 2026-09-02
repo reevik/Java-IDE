@@ -367,6 +367,7 @@ pub fn run() {
             commands::tool_paths,
             commands::set_toolchain_dir,
             commands::toolchain_info,
+            commands::detected_jdks,
             commands::project_modules,
             commands::dependency_tree,
             commands::create_module,

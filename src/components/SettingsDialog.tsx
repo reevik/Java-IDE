@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   aiSettings,
   appVersion,
+  detectedJdks,
   setLlmApiKey,
   setModel,
   setToolchainDir,
@@ -275,6 +276,7 @@ function ThemeSwatch({ kind }: { kind: Appearance }) {
 function JavaTab() {
   const qc = useQueryClient();
   const { data: info } = useQuery({ queryKey: ["toolchain-info"], queryFn: toolchainInfo });
+  const { data: jdks } = useQuery({ queryKey: ["detected-jdks"], queryFn: detectedJdks });
   const [dir, setDir] = useState<string>(loadToolchainDir());
 
   const apply = async (value: string) => {
@@ -291,9 +293,52 @@ function JavaTab() {
     if (typeof picked === "string") void apply(picked);
   };
 
+  // The active JDK: an explicit override, else whichever detected one owns the
+  // auto-detected JAVA_HOME.
+  const activeBin = dir || (info?.java_home ? `${info.java_home}/bin` : "");
+
   return (
     <div>
-      <Section title="JDK location">
+      <Section title="Detected JDKs">
+        {!jdks ? (
+          <p className="text-[12px] text-[var(--text-tertiary)]">Detecting…</p>
+        ) : jdks.length === 0 ? (
+          <p className="text-[12px] text-[var(--text-tertiary)]">No JDKs found. Install one (e.g. <code className="font-mono">brew install openjdk@17</code>) or set a path below.</p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {jdks.map((j) => {
+              const active = j.bin === activeBin;
+              return (
+                <button
+                  key={j.home}
+                  onClick={() => void apply(j.bin)}
+                  className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left ${
+                    active ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[color:var(--line)] hover:bg-[var(--hover)]"
+                  }`}
+                >
+                  <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? "border-[var(--accent)]" : "border-[color:var(--line)]"}`}>
+                    {active && <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[12.5px] font-medium text-[var(--text-primary)]">{j.name || `Java ${j.version}`}</span>
+                      <span className="shrink-0 text-[10.5px] text-[var(--text-tertiary)]">{j.arch}</span>
+                      {active && <span className="shrink-0 text-[10px] font-medium text-[var(--accent-strong)]">DEFAULT</span>}
+                    </div>
+                    <div className="truncate font-mono text-[10.5px] text-[var(--text-tertiary)]" title={j.home}>{j.home}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+          The selected JDK is used for build/run, the language server, and formatting; its{" "}
+          <code className="font-mono">JAVA_HOME</code> is passed to Maven/Gradle.
+        </p>
+      </Section>
+
+      <Section title="Custom JDK location">
         <div className="flex items-center gap-2">
           <input
             value={dir}
@@ -302,16 +347,14 @@ function JavaTab() {
             className="field min-w-0 flex-1 px-2 py-1.5 font-mono text-[12px]"
           />
           <button onClick={() => void browse()} title="Browse…" className="btn-bezel shrink-0 px-2.5 py-1.5 text-[12px]">…</button>
-          {dir && <button onClick={() => void apply("")} title="Reset to auto" className="btn-bezel shrink-0 px-2.5 py-1.5 text-[12px]">Auto</button>}
+          {dir && <button onClick={() => void apply("")} title="Reset to auto (use PATH)" className="btn-bezel shrink-0 px-2.5 py-1.5 text-[12px]">Auto</button>}
         </div>
         <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
-          A JDK’s <code className="font-mono">bin</code> directory (containing <code className="font-mono">java</code> and{" "}
-          <code className="font-mono">javac</code>). Used for build/run, the language server, and formatting; its{" "}
-          <code className="font-mono">JAVA_HOME</code> is passed to Maven/Gradle.
+          A JDK’s <code className="font-mono">bin</code> directory, for JDKs not listed above. “Auto” falls back to the JDK on your <code className="font-mono">PATH</code>.
         </p>
       </Section>
 
-      <Section title="Detected">
+      <Section title="Active">
         <Row label="Java version" value={info?.version ? info.version : "—"} />
         <Row label="Vendor" value={info?.vendor ?? "—"} />
         <Row label="java" value={info?.java ?? "not found"} mono muted={!info?.java} />
