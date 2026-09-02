@@ -1,6 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { EditorState, StateEffect, StateField, RangeSet, Compartment, type Text } from "@codemirror/state";
 import {
   EditorView,
@@ -764,8 +763,6 @@ function rustAnalyzerSource(root: string, path: string) {
         ctx.pos - line.from,
       );
       if (items.length === 0) return null;
-      // TEMP DEBUG: dump the first few parsed items to /tmp/rustade-client.log
-      invoke("log_client", { line: `COMPLETION word.from=${word?.from} pos=${ctx.pos} afterDot=${afterDot} items=${JSON.stringify(items.slice(0, 4))}` }).catch(() => {});
       const n = items.length;
       return {
         from: word ? word.from : ctx.pos,
