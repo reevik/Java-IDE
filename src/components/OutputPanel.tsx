@@ -49,6 +49,8 @@ interface Props {
   onOpenDiff: (hash: string, relPath: string) => void;
   /** Open the working-tree diff for a file as an editor tab. */
   onOpenWorkingDiff: (relPath: string) => void;
+  /** Send the current console output to the AI Assistant for analysis. */
+  onAnalyze?: (text: string) => void;
 }
 
 export default function OutputPanel({
@@ -70,8 +72,16 @@ export default function OutputPanel({
   gitRoot,
   onOpenDiff,
   onOpenWorkingDiff,
+  onAnalyze,
 }: Props) {
   const outRef = useRef<HTMLDivElement>(null);
+
+  // Gather the console output (capped) for the AI Analysis action.
+  const analyze = () => {
+    const text = lines.slice(-500).map((l) => l.text).join("\n").trim();
+    if (text) onAnalyze?.(text);
+  };
+  const canAnalyze = !!onAnalyze && lines.length > 0;
 
   // Follow the tail while a command streams.
   useEffect(() => {
@@ -94,7 +104,19 @@ export default function OutputPanel({
     debug.status === "paused" ? "#f5a623" : debug.status === "running" || debug.status === "building" ? "#2f9e44" : null;
 
   return (
-    <section className="output-pane flex h-full min-h-0 flex-col">
+    <section className="output-pane flex h-full min-h-0">
+      <nav className="flex w-9 shrink-0 flex-col items-center gap-1 border-r border-[color:var(--line)] pt-2">
+        <button
+          onClick={analyze}
+          disabled={!canAnalyze}
+          title="AI Analysis — send the output to the AI Assistant"
+          aria-label="AI Analysis"
+          className="grid h-7 w-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)] hover:text-[var(--accent-strong)] disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <AiSparkIcon />
+        </button>
+      </nav>
+      <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-8 shrink-0 items-center gap-1 border-b border-[color:var(--line)] px-2">
         <TabButton active={tab === "problems"} onClick={() => onTab("problems")}>
           Problems
@@ -223,7 +245,17 @@ export default function OutputPanel({
           )}
         </div>
       )}
+      </div>
     </section>
+  );
+}
+
+function AiSparkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden>
+      <path d="M12 2l1.6 4.4L18 8l-4.4 1.6L12 14l-1.6-4.4L6 8l4.4-1.6L12 2z" />
+      <path d="M18.5 13l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" opacity="0.75" />
+    </svg>
   );
 }
 
