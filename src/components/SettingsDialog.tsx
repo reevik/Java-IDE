@@ -12,7 +12,7 @@ import {
   toolPaths,
   type ToolInfo,
 } from "../lib/api";
-import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, loadWrapColumn, saveAppearance, saveFont, saveWrapColumn, type Appearance } from "../lib/theme";
+import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, loadMarginColumn, loadShowMargin, loadWrapAtMargin, saveAppearance, saveFont, saveMargin, type Appearance } from "../lib/theme";
 import { editorThemeOptions, loadEditorTheme, saveEditorTheme } from "../lib/editorThemes";
 
 type Tab = "general" | "appearance" | "java" | "ai" | "tools";
@@ -134,7 +134,13 @@ function AppearanceTab() {
   const [darkScheme, setDarkScheme] = useState<string>(loadEditorTheme(true));
   const [fontFamily, setFontFamily] = useState<string>(loadFontFamily());
   const [fontSize, setFontSize] = useState<number>(loadFontSize());
-  const [wrapCol, setWrapCol] = useState<number>(loadWrapColumn());
+  const [marginCol, setMarginCol] = useState<number>(loadMarginColumn());
+  const [wrapAt, setWrapAt] = useState<boolean>(loadWrapAtMargin());
+  const [showMargin, setShowMargin] = useState<boolean>(loadShowMargin());
+  const applyMargin = (col: number, wrap: boolean, show: boolean) => {
+    setMarginCol(col); setWrapAt(wrap); setShowMargin(show);
+    saveMargin(col, wrap, show);
+  };
   const pick = (a: Appearance) => {
     setChoice(a);
     saveAppearance(a);
@@ -239,33 +245,30 @@ function AppearanceTab() {
         <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">Applies to the code editor. If a typeface isn’t installed it falls back to the system monospace.</p>
       </Section>
 
-      <Section title="Line wrapping">
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={wrapCol > 0}
-            onChange={(e) => { const v = e.target.checked ? (wrapCol > 0 ? wrapCol : 100) : 0; setWrapCol(v); saveWrapColumn(v); }}
-            className="accent-[var(--accent)]"
-          />
-          <span className="text-[12.5px] text-[var(--text-primary)]">Wrap long lines at a column</span>
-        </label>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[12px] text-[var(--text-secondary)]">Wrap column</span>
+      <Section title="Right margin">
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] text-[var(--text-secondary)]">Column</span>
           <input
             type="number"
             min={20}
             max={400}
             step={1}
-            disabled={wrapCol === 0}
-            value={wrapCol === 0 ? "" : wrapCol}
-            placeholder="off"
-            onChange={(e) => { const v = Math.max(0, Math.min(400, Number(e.target.value) || 0)); setWrapCol(v); saveWrapColumn(v); }}
-            className="field w-[90px] px-2 py-1 text-[12.5px] disabled:opacity-50"
+            value={marginCol}
+            onChange={(e) => { const v = Math.max(20, Math.min(400, Number(e.target.value) || 100)); applyMargin(v, wrapAt, showMargin); }}
+            className="field w-[90px] px-2 py-1 text-[12.5px]"
           />
           <span className="text-[11px] text-[var(--text-tertiary)]">characters</span>
         </div>
+        <label className="mt-2.5 flex items-center gap-2">
+          <input type="checkbox" checked={showMargin} onChange={(e) => applyMargin(marginCol, wrapAt, e.target.checked)} className="accent-[var(--accent)]" />
+          <span className="text-[12.5px] text-[var(--text-primary)]">Show a gray guide line at the column</span>
+        </label>
+        <label className="mt-2 flex items-center gap-2">
+          <input type="checkbox" checked={wrapAt} onChange={(e) => applyMargin(marginCol, e.target.checked, showMargin)} className="accent-[var(--accent)]" />
+          <span className="text-[12.5px] text-[var(--text-primary)]">Wrap long lines at the column</span>
+        </label>
         <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
-          When on, lines longer than the column soft-wrap (the text isn’t changed on disk), with a faint guide at the wrap column. Off = no wrapping.
+          The guide and wrapping are independent. Wrapping is display-only — the text on disk isn’t changed.
         </p>
       </Section>
     </div>

@@ -33,14 +33,31 @@ export function loadFontSize(): number {
   return Number.isFinite(n) && n >= 9 && n <= 28 ? n : 13;
 }
 
-const WRAP_COLUMN_KEY = "editor.wrapColumn";
-/** Column at which to soft-wrap long lines; 0 = off (no wrapping). */
-export function loadWrapColumn(): number {
-  const n = Number(localStorage.getItem(WRAP_COLUMN_KEY));
-  return Number.isFinite(n) && n >= 0 && n <= 400 ? n : 0;
+// --- Right margin: a column for the guide line + optional soft wrap ----------
+const MARGIN_COLUMN_KEY = "editor.marginColumn";
+const WRAP_AT_MARGIN_KEY = "editor.wrapAtMargin";
+const SHOW_MARGIN_KEY = "editor.showMargin";
+
+/** The right-margin column (characters). Migrates the old `editor.wrapColumn`. */
+export function loadMarginColumn(): number {
+  const n = Number(localStorage.getItem(MARGIN_COLUMN_KEY) ?? localStorage.getItem("editor.wrapColumn"));
+  return Number.isFinite(n) && n >= 20 && n <= 400 ? n : 100;
 }
-export function saveWrapColumn(cols: number) {
-  localStorage.setItem(WRAP_COLUMN_KEY, String(cols));
+/** Soft-wrap long lines at the margin. Migrates the old wrapColumn>0 meaning. */
+export function loadWrapAtMargin(): boolean {
+  const v = localStorage.getItem(WRAP_AT_MARGIN_KEY);
+  if (v != null) return v === "1";
+  const old = Number(localStorage.getItem("editor.wrapColumn"));
+  return Number.isFinite(old) && old > 0;
+}
+/** Show the gray vertical guide at the margin column. */
+export function loadShowMargin(): boolean {
+  return localStorage.getItem(SHOW_MARGIN_KEY) === "1";
+}
+export function saveMargin(column: number, wrap: boolean, show: boolean) {
+  localStorage.setItem(MARGIN_COLUMN_KEY, String(column));
+  localStorage.setItem(WRAP_AT_MARGIN_KEY, wrap ? "1" : "0");
+  localStorage.setItem(SHOW_MARGIN_KEY, show ? "1" : "0");
   // Open editors reconfigure via the same live-settings event.
   window.dispatchEvent(new Event("rustade:theme"));
 }

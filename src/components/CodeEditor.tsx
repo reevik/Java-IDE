@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { EditorState, StateEffect, StateField, RangeSet, Compartment, type Text } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, RangeSet, Compartment, type Extension, type Text } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -21,7 +21,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { QuickSearchPanel } from "./QuickSearchPanel";
 import { EDITOR_THEMES, loadEditorTheme } from "../lib/editorThemes";
-import { loadWrapColumn } from "../lib/theme";
+import { loadMarginColumn, loadShowMargin, loadWrapAtMargin } from "../lib/theme";
 import {
   HighlightStyle,
   syntaxHighlighting,
@@ -1153,23 +1153,25 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     const picked = EDITOR_THEMES.find((x) => x.id === loadEditorTheme(dark));
     const hl = picked ? picked.highlight : dark ? darkHighlightStyle : highlightStyle;
     const th = picked ? picked.theme : dark ? themeDark : theme;
-    // Optional soft-wrap: break lines past a configured column (0 = off). The
-    // `ch` unit is one monospace character, so max-width N ch wraps at column N.
-    const wrapCol = loadWrapColumn();
-    const wrap =
-      wrapCol > 0
-        ? [
-            EditorView.lineWrapping,
-            EditorView.theme({
-              ".cm-content": { maxWidth: `${wrapCol}ch` },
-              // A faint right-margin guide at the wrap column.
-              ".cm-line": {
-                backgroundImage: `linear-gradient(to right, transparent calc(${wrapCol}ch - 1px), var(--line) calc(${wrapCol}ch - 1px), var(--line) ${wrapCol}ch, transparent ${wrapCol}ch)`,
-              },
-            }),
-          ]
-        : [];
-    return [syntaxHighlighting(hl), th, ...wrap];
+    // Right margin: an optional soft-wrap at the column and/or a gray guide line.
+    // The `ch` unit is one monospace character, so column N sits at N ch.
+    const col = loadMarginColumn();
+    const wrapOn = loadWrapAtMargin();
+    const showOn = loadShowMargin();
+    const extras: Extension[] = [];
+    if (wrapOn) extras.push(EditorView.lineWrapping);
+    const content: Record<string, string> = {};
+    if (wrapOn) content.maxWidth = `${col}ch`; // wrap lines past the column
+    if (showOn) content.minWidth = `${col}ch`; // so the guide spans short lines too
+    const styles: Record<string, Record<string, string>> = {};
+    if (Object.keys(content).length) styles[".cm-content"] = content;
+    if (showOn) {
+      styles[".cm-line"] = {
+        backgroundImage: `linear-gradient(to right, transparent calc(${col}ch - 0.5px), var(--line) calc(${col}ch - 0.5px), var(--line) calc(${col}ch + 0.5px), transparent calc(${col}ch + 0.5px))`,
+      };
+    }
+    if (Object.keys(styles).length) extras.push(EditorView.theme(styles));
+    return [syntaxHighlighting(hl), th, ...extras];
   };
 
   // Live re-theme open editors when the appearance / scheme changes (no reload).
