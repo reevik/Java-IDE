@@ -163,6 +163,15 @@ export default function OutputPanel({
             >
               <AiSparkIcon />
             </button>
+            <button
+              onClick={onClear}
+              disabled={lines.length === 0}
+              title="Clear output"
+              aria-label="Clear output"
+              className="grid h-7 w-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ClearIcon />
+            </button>
           </nav>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -259,6 +268,17 @@ function AiSparkIcon() {
     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden>
       <path d="M12 2l1.6 4.4L18 8l-4.4 1.6L12 14l-1.6-4.4L6 8l4.4-1.6L12 2z" />
       <path d="M18.5 13l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" opacity="0.75" />
+    </svg>
+  );
+}
+
+/** Eraser — "clear the output". */
+function ClearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+      <path d="M22 21H7" />
+      <path d="m5 11 9 9" />
     </svg>
   );
 }
