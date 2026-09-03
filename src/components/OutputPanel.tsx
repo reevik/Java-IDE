@@ -125,14 +125,14 @@ export default function OutputPanel({
         <span className={`ml-auto flex items-center gap-2 pr-1 text-[11px] text-[var(--text-tertiary)] ${tab === "debugger" || tab === "git" || tab === "breakpoints" || tab === "usages" ? "hidden" : ""}`}>
           {running ? (
             <>
-              <span className="text-[var(--accent)]">cargo {command}…</span>
+              <span className="text-[var(--accent)]">{runLabel(command)}…</span>
               <button onClick={onCancel} className="btn-bezel px-2 py-0.5 text-[11px]">
                 Stop
               </button>
             </>
           ) : lastResult ? (
             <span className={lastResult.code === 0 ? "text-green-600" : "text-red-500"}>
-              {lastResult.code === 0 ? "✓" : "✗"} cargo {command} · {lastResult.secs.toFixed(1)}s
+              {lastResult.code === 0 ? "✓" : "✗"} {runLabel(command)} · {lastResult.secs.toFixed(1)}s
             </span>
           ) : null}
           <button onClick={onClear} className="btn-bezel px-2 py-0.5 text-[11px]">
@@ -225,6 +225,19 @@ export default function OutputPanel({
       )}
     </section>
   );
+}
+
+/** A human label for the running build-tool command (Maven/Gradle under the hood). */
+function runLabel(command: string | null): string {
+  switch (command) {
+    case "run": return "Run";
+    case "build": return "Build";
+    case "test": return "Test";
+    case "check":
+    case "clippy": return "Check";
+    case "fmt": return "Format";
+    default: return command ?? "Task";
+  }
 }
 
 function TabButton({
