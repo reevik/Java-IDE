@@ -1456,6 +1456,10 @@ select.field option {
   min-height: 1em;
   cursor: pointer;
 }
+/* Lint gutter error/warning/info indicators are interactive (hover for details). */
+.cm-lint-marker {
+  cursor: pointer;
+}
 .cm-change-added {
   background: #3fb950;
 }
