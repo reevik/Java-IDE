@@ -1168,8 +1168,9 @@ export default function App() {
       setOutputHidden(false);
       setOutputTab("debugger");
       setDebugConsole([
-        "Debugger unavailable: lldb-dap not found.",
-        "Install the Xcode Command Line Tools — run: xcode-select --install",
+        "Debugger unavailable: the java-debug plugin isn't installed.",
+        "Install Microsoft's java-debug (e.g. VS Code's 'Debugger for Java' extension) and set",
+        "JAVA_DEBUG_BUNDLE to its com.microsoft.java.debug.plugin-*.jar, then reopen the project.",
       ]);
       return;
     }

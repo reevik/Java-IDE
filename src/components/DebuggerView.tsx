@@ -16,7 +16,7 @@ export interface DebugTarget {
 
 export interface DebugProps {
   status: DebugStatus;
-  /** False when no lldb-dap adapter is installed. */
+  /** False when the java-debug plugin isn't installed. */
   available: boolean;
   target: DebugTarget;
   bins: string[];
@@ -49,12 +49,17 @@ export default function DebuggerView(d: DebugProps) {
       <div className="flex h-full flex-col">
         <Toolbar {...d} />
         <div className="m-3 max-w-xl rounded-lg border border-[color:var(--line)] bg-[var(--surface-2)] p-3 text-[12px] leading-relaxed text-[var(--text-secondary)]">
-          <p className="mb-1.5 font-medium text-[var(--text-primary)]">No debug adapter found</p>
+          <p className="mb-1.5 font-medium text-[var(--text-primary)]">java-debug plugin not found</p>
           <p>
-            Debugging needs Apple's <code className="font-mono">lldb-dap</code>, which ships with the Xcode Command
-            Line Tools. Install it, then reopen the project:
+            Java debugging runs inside the language server via Microsoft's{" "}
+            <code className="font-mono">java-debug</code> plugin. Install it (e.g. VS Code's “Debugger for Java”
+            extension, or build it from source), then point the IDE at its plugin jar and reopen the project:
           </p>
-          <pre className="mt-2 w-fit rounded bg-[var(--surface-2)] px-2 py-1 font-mono text-[11.5px]">xcode-select --install</pre>
+          <pre className="mt-2 w-fit whitespace-pre-wrap rounded bg-[var(--surface-2)] px-2 py-1 font-mono text-[11.5px]">export JAVA_DEBUG_BUNDLE=/path/to/com.microsoft.java.debug.plugin-VERSION.jar</pre>
+          <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+            Or drop the jar in <code className="font-mono">~/.local/share/java-debug/</code>. It’s auto-detected
+            from there, from <code className="font-mono">~/.vscode/extensions</code>, and from mason.
+          </p>
         </div>
       </div>
     );
