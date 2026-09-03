@@ -40,6 +40,7 @@ import {
 import { java } from "@codemirror/lang-java";
 import { xml } from "@codemirror/lang-xml";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
+import { properties } from "@codemirror/legacy-modes/mode/properties";
 import {
   autocompletion,
   completionKeymap,
@@ -503,6 +504,93 @@ const xmlInlineDiagPlugin = ViewPlugin.fromClass(
     }
     update(u: ViewUpdate) {
       if (u.docChanged) this.decorations = buildInlineDiags(u.view.state.doc, xmlDiagnostics(u.view));
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+// --- Java .properties: highlighting + validation ----------------------------
+
+// Per-language token map so keys/values/sections get styled without touching
+// the global highlight style. The mode tags keys as "def", a built-in name the
+// tokenTable can't override, so rename it to a custom token first.
+const propertiesLang = StreamLanguage.define({
+  ...properties,
+  token(stream, state) {
+    const tok = properties.token(stream, state);
+    return tok === "def" ? "propertyDef" : tok;
+  },
+  tokenTable: { propertyDef: t.typeName, quote: t.string, header: t.keyword },
+});
+
+/** The key (before the first unescaped `=`, `:` or space); leading space skipped. */
+function propertyKey(text: string): { key: string; start: number } {
+  let i = 0;
+  while (i < text.length && (text[i] === " " || text[i] === "\t")) i++;
+  const start = i;
+  let key = "";
+  for (; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\\") { key += c + (text[i + 1] ?? ""); i++; continue; }
+    if (c === "=" || c === ":" || c === " " || c === "\t") break;
+    key += c;
+  }
+  return { key, start };
+}
+
+/** Validate a .properties file: bad `\u` escapes (error) + duplicate keys (warning). */
+function propertiesDiagnostics(view: EditorView): LspDiagnostic[] {
+  const doc = view.state.doc;
+  const out: LspDiagnostic[] = [];
+  const seen = new Set<string>();
+  let continuation = false; // previous logical line continued via a trailing "\"
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    const text = line.text;
+    const wasContinuation = continuation;
+    const trailing = /(\\*)$/.exec(text)?.[1].length ?? 0;
+    continuation = trailing % 2 === 1;
+
+    // Malformed unicode escapes anywhere on the line.
+    const badU = /\\u(?![0-9a-fA-F]{4})/g;
+    let m: RegExpExecArray | null;
+    while ((m = badU.exec(text)) !== null) {
+      out.push({
+        range: { start: { line: i - 1, character: m.index }, end: { line: i - 1, character: m.index + 2 } },
+        severity: 1,
+        message: "Properties: invalid \\u escape — expected 4 hex digits.",
+      });
+    }
+
+    if (wasContinuation) continue; // a wrapped value, not a key line
+    const trimmed = text.replace(/^\s+/, "");
+    if (trimmed === "" || /^[#!;]/.test(trimmed)) continue; // blank or comment
+
+    const { key, start } = propertyKey(text);
+    if (!key) continue;
+    if (seen.has(key)) {
+      out.push({
+        range: { start: { line: i - 1, character: start }, end: { line: i - 1, character: start + key.length } },
+        severity: 2,
+        message: `Properties: duplicate key '${key}' — the last value wins.`,
+      });
+    } else {
+      seen.add(key);
+    }
+  }
+  return out;
+}
+
+const propertiesLinter = linter((view) => toCmDiagnostics(view, propertiesDiagnostics(view)), { delay: 300 });
+
+const propertiesInlineDiagPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildInlineDiags(view.state.doc, propertiesDiagnostics(view));
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged) this.decorations = buildInlineDiags(u.view.state.doc, propertiesDiagnostics(u.view));
     }
   },
   { decorations: (v) => v.decorations },
@@ -1403,6 +1491,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         // linter + inline plugin mark well-formedness errors like Java compile
         // errors (squiggle, gutter, hover, end-of-line message).
         ...(path.endsWith(".xml") ? [xml(), xmlLinter, xmlInlineDiagPlugin] : []),
+        // Java .properties: highlighting + validation (bad \u escapes, dup keys).
+        ...(path.endsWith(".properties") ? [propertiesLang, propertiesLinter, propertiesInlineDiagPlugin] : []),
         ...(path.endsWith(".toml") ? [StreamLanguage.define(toml)] : []),
         themeComp.current.of(editorThemeExtensions()),
         EditorView.updateListener.of((u) => {
