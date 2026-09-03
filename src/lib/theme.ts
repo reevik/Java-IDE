@@ -33,6 +33,18 @@ export function loadFontSize(): number {
   return Number.isFinite(n) && n >= 9 && n <= 28 ? n : 13;
 }
 
+const WRAP_COLUMN_KEY = "editor.wrapColumn";
+/** Column at which to soft-wrap long lines; 0 = off (no wrapping). */
+export function loadWrapColumn(): number {
+  const n = Number(localStorage.getItem(WRAP_COLUMN_KEY));
+  return Number.isFinite(n) && n >= 0 && n <= 400 ? n : 0;
+}
+export function saveWrapColumn(cols: number) {
+  localStorage.setItem(WRAP_COLUMN_KEY, String(cols));
+  // Open editors reconfigure via the same live-settings event.
+  window.dispatchEvent(new Event("rustade:theme"));
+}
+
 /** Push the font choice into the CSS variables the editors read. */
 export function applyFont() {
   const st = document.documentElement.style;

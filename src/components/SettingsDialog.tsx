@@ -12,7 +12,7 @@ import {
   toolPaths,
   type ToolInfo,
 } from "../lib/api";
-import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, saveAppearance, saveFont, type Appearance } from "../lib/theme";
+import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, loadWrapColumn, saveAppearance, saveFont, saveWrapColumn, type Appearance } from "../lib/theme";
 import { editorThemeOptions, loadEditorTheme, saveEditorTheme } from "../lib/editorThemes";
 
 type Tab = "general" | "appearance" | "java" | "ai" | "tools";
@@ -134,6 +134,7 @@ function AppearanceTab() {
   const [darkScheme, setDarkScheme] = useState<string>(loadEditorTheme(true));
   const [fontFamily, setFontFamily] = useState<string>(loadFontFamily());
   const [fontSize, setFontSize] = useState<number>(loadFontSize());
+  const [wrapCol, setWrapCol] = useState<number>(loadWrapColumn());
   const pick = (a: Appearance) => {
     setChoice(a);
     saveAppearance(a);
@@ -236,6 +237,36 @@ function AppearanceTab() {
           <div className="text-[var(--text-secondary)]">{"}"}</div>
         </div>
         <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">Applies to the code editor. If a typeface isn’t installed it falls back to the system monospace.</p>
+      </Section>
+
+      <Section title="Line wrapping">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={wrapCol > 0}
+            onChange={(e) => { const v = e.target.checked ? (wrapCol > 0 ? wrapCol : 100) : 0; setWrapCol(v); saveWrapColumn(v); }}
+            className="accent-[var(--accent)]"
+          />
+          <span className="text-[12.5px] text-[var(--text-primary)]">Wrap long lines at a column</span>
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[12px] text-[var(--text-secondary)]">Wrap column</span>
+          <input
+            type="number"
+            min={20}
+            max={400}
+            step={1}
+            disabled={wrapCol === 0}
+            value={wrapCol === 0 ? "" : wrapCol}
+            placeholder="off"
+            onChange={(e) => { const v = Math.max(0, Math.min(400, Number(e.target.value) || 0)); setWrapCol(v); saveWrapColumn(v); }}
+            className="field w-[90px] px-2 py-1 text-[12.5px] disabled:opacity-50"
+          />
+          <span className="text-[11px] text-[var(--text-tertiary)]">characters</span>
+        </div>
+        <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+          When on, lines longer than the column soft-wrap (the text isn’t changed on disk), with a faint guide at the wrap column. Off = no wrapping.
+        </p>
       </Section>
     </div>
   );

@@ -21,6 +21,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { QuickSearchPanel } from "./QuickSearchPanel";
 import { EDITOR_THEMES, loadEditorTheme } from "../lib/editorThemes";
+import { loadWrapColumn } from "../lib/theme";
 import {
   HighlightStyle,
   syntaxHighlighting,
@@ -1152,7 +1153,23 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     const picked = EDITOR_THEMES.find((x) => x.id === loadEditorTheme(dark));
     const hl = picked ? picked.highlight : dark ? darkHighlightStyle : highlightStyle;
     const th = picked ? picked.theme : dark ? themeDark : theme;
-    return [syntaxHighlighting(hl), th];
+    // Optional soft-wrap: break lines past a configured column (0 = off). The
+    // `ch` unit is one monospace character, so max-width N ch wraps at column N.
+    const wrapCol = loadWrapColumn();
+    const wrap =
+      wrapCol > 0
+        ? [
+            EditorView.lineWrapping,
+            EditorView.theme({
+              ".cm-content": { maxWidth: `${wrapCol}ch` },
+              // A faint right-margin guide at the wrap column.
+              ".cm-line": {
+                backgroundImage: `linear-gradient(to right, transparent calc(${wrapCol}ch - 1px), var(--line) calc(${wrapCol}ch - 1px), var(--line) ${wrapCol}ch, transparent ${wrapCol}ch)`,
+              },
+            }),
+          ]
+        : [];
+    return [syntaxHighlighting(hl), th, ...wrap];
   };
 
   // Live re-theme open editors when the appearance / scheme changes (no reload).
