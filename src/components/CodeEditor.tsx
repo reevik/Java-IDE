@@ -16,7 +16,7 @@ import {
   type ViewUpdate,
   type DecorationSet,
 } from "@codemirror/view";
-import { lintGutter, setDiagnostics, type Diagnostic as CmDiagnostic } from "@codemirror/lint";
+import { lintGutter, linter, setDiagnostics, type Diagnostic as CmDiagnostic } from "@codemirror/lint";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { QuickSearchPanel } from "./QuickSearchPanel";
@@ -24,6 +24,8 @@ import { EDITOR_THEMES, loadEditorTheme } from "../lib/editorThemes";
 import {
   HighlightStyle,
   syntaxHighlighting,
+  syntaxTree,
+  ensureSyntaxTree,
   indentUnit,
   bracketMatching,
   StreamLanguage,
@@ -440,6 +442,71 @@ function buildInlineDiags(doc: Text, diags: LspDiagnostic[]): DecorationSet {
   ranges.sort((a, b) => a.from - b.from);
   return Decoration.set(ranges);
 }
+
+// --- XML well-formedness diagnostics ----------------------------------------
+// XML has no language server, so we derive diagnostics from lang-xml's parse
+// tree (error nodes = malformed markup / mismatched tags) and feed them through
+// the same lint + inline-Error-Lens pipeline Java uses.
+
+function xmlDiagnostics(view: EditorView): LspDiagnostic[] {
+  const state = view.state;
+  const doc = state.doc;
+  // Force a full parse so errors near the end aren't missed on first paint.
+  const tree = ensureSyntaxTree(state, doc.length, 2000) ?? syntaxTree(state);
+  const out: LspDiagnostic[] = [];
+  const seen = new Set<string>();
+  tree.cursor().iterate((node) => {
+    // Lezer marks unclosed tags / stray characters as error nodes, and a
+    // wrong closing name as a dedicated `MismatchedCloseTag` (not an error node).
+    // `MissingCloseTag` only ever co-occurs with a mismatch, so we skip it to
+    // avoid flagging the same mistake twice.
+    const isError = node.type.isError;
+    const mismatched = node.name === "MismatchedCloseTag";
+    if (!isError && !mismatched) return;
+
+    let from = node.from;
+    let to = node.to;
+    if (to <= from) {
+      // Zero-length error node → mark one character (or the char before EOF).
+      if (from < doc.length) to = from + 1;
+      else from = Math.max(0, from - 1);
+    }
+    const key = `${from}:${to}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const s = doc.lineAt(from);
+    const e = doc.lineAt(to);
+    const message = mismatched
+      ? `XML: mismatched closing tag ${doc.sliceString(from, to)}`
+      : "XML: syntax error — check for an unclosed tag or invalid character.";
+    out.push({
+      range: {
+        start: { line: s.number - 1, character: from - s.from },
+        end: { line: e.number - 1, character: to - e.from },
+      },
+      severity: 1,
+      message,
+    });
+  });
+  return out;
+}
+
+/** A @codemirror/lint source: red squiggle + gutter marker + hover for XML. */
+const xmlLinter = linter((view) => toCmDiagnostics(view, xmlDiagnostics(view)), { delay: 300 });
+
+/** Error-Lens: the message at the end of the offending line (matches Java). */
+const xmlInlineDiagPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildInlineDiags(view.state.doc, xmlDiagnostics(view));
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged) this.decorations = buildInlineDiags(u.view.state.doc, xmlDiagnostics(u.view));
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
 
 // --- Collaborative agent editing: highlight the agent's edits + a "You" caret ---
 
@@ -1332,8 +1399,10 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             ]
           : []),
         // XML (pom.xml, settings.xml, …): highlighting + element folding come
-        // from lang-xml; the shared foldGutter above renders the chevrons.
-        ...(path.endsWith(".xml") ? [xml()] : []),
+        // from lang-xml; the shared foldGutter renders the chevrons; and the
+        // linter + inline plugin mark well-formedness errors like Java compile
+        // errors (squiggle, gutter, hover, end-of-line message).
+        ...(path.endsWith(".xml") ? [xml(), xmlLinter, xmlInlineDiagPlugin] : []),
         ...(path.endsWith(".toml") ? [StreamLanguage.define(toml)] : []),
         themeComp.current.of(editorThemeExtensions()),
         EditorView.updateListener.of((u) => {
