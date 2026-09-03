@@ -81,7 +81,7 @@ export default function OutputPanel({
     const text = lines.slice(-500).map((l) => l.text).join("\n").trim();
     if (text) onAnalyze?.(text);
   };
-  const canAnalyze = !!onAnalyze && lines.length > 0;
+  const canAnalyze = !!onAnalyze && tab === "output" && lines.length > 0;
 
   // Follow the tail while a command streams.
   useEffect(() => {
@@ -105,17 +105,19 @@ export default function OutputPanel({
 
   return (
     <section className="output-pane flex h-full min-h-0">
-      <nav className="flex w-9 shrink-0 flex-col items-center gap-1 border-r border-[color:var(--line)] pt-2">
-        <button
-          onClick={analyze}
-          disabled={!canAnalyze}
-          title="AI Analysis — send the output to the AI Assistant"
-          aria-label="AI Analysis"
-          className="grid h-7 w-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)] hover:text-[var(--accent-strong)] disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <AiSparkIcon />
-        </button>
-      </nav>
+      {tab === "output" && (
+        <nav className="flex w-9 shrink-0 flex-col items-center gap-1 border-r border-[color:var(--line)] pt-2">
+          <button
+            onClick={analyze}
+            disabled={!canAnalyze}
+            title="AI Analysis — send this output to the AI Assistant"
+            aria-label="AI Analysis"
+            className="grid h-7 w-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)] hover:text-[var(--accent-strong)] disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <AiSparkIcon />
+          </button>
+        </nav>
+      )}
       <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-8 shrink-0 items-center gap-1 border-b border-[color:var(--line)] px-2">
         <TabButton active={tab === "problems"} onClick={() => onTab("problems")}>
