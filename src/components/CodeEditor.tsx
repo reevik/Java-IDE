@@ -39,6 +39,7 @@ import {
 } from "@codemirror/language";
 import { java } from "@codemirror/lang-java";
 import { xml } from "@codemirror/lang-xml";
+import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
 import { properties } from "@codemirror/legacy-modes/mode/properties";
 import {
@@ -632,6 +633,41 @@ function propertiesDiagnostics(view: EditorView): LspDiagnostic[] {
 }
 
 const propertiesLinter = linter((view) => toCmDiagnostics(view, propertiesDiagnostics(view)), { delay: 300 });
+
+// --- JSON: highlighting + folding (from lang-json) + parse-error location ----
+
+const jsonParse = jsonParseLinter();
+
+/** Convert lang-json's parse error into our diagnostic shape (with line/char). */
+function jsonDiagnostics(view: EditorView): LspDiagnostic[] {
+  const doc = view.state.doc;
+  return jsonParse(view).map((d) => {
+    const from = Math.min(d.from, doc.length);
+    const to = Math.min(Math.max(d.to, from + 1), doc.length);
+    const s = doc.lineAt(from);
+    const e = doc.lineAt(to);
+    return {
+      range: { start: { line: s.number - 1, character: from - s.from }, end: { line: e.number - 1, character: to - e.from } },
+      severity: 1,
+      message: `JSON: ${d.message}`,
+    };
+  });
+}
+
+const jsonLinter = linter((view) => toCmDiagnostics(view, jsonDiagnostics(view)), { delay: 300 });
+
+const jsonInlineDiagPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildInlineDiags(view.state.doc, jsonDiagnostics(view));
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged) this.decorations = buildInlineDiags(u.view.state.doc, jsonDiagnostics(u.view));
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
 
 const propertiesInlineDiagPlugin = ViewPlugin.fromClass(
   class {
@@ -1598,6 +1634,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         ...(path.endsWith(".xml") ? [xml(), xmlLinter, xmlInlineDiagPlugin] : []),
         // Java .properties: highlighting + validation (bad \u escapes, dup keys).
         ...(path.endsWith(".properties") ? [propertiesLang, propertiesLinter, propertiesInlineDiagPlugin] : []),
+        // JSON: highlighting + object/array folding + parse-error location.
+        ...(path.endsWith(".json") ? [json(), jsonLinter, jsonInlineDiagPlugin] : []),
         ...(path.endsWith(".toml") ? [StreamLanguage.define(toml)] : []),
         themeComp.current.of(editorThemeExtensions()),
         EditorView.updateListener.of((u) => {
