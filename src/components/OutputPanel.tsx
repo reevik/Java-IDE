@@ -151,7 +151,7 @@ export default function OutputPanel({
         </span>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
         {tab === "output" && (
           <nav className="flex w-9 shrink-0 flex-col items-center gap-1 border-r border-[color:var(--line)] pt-2">
             <button
@@ -165,7 +165,7 @@ export default function OutputPanel({
             </button>
           </nav>
         )}
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {tab === "git" ? (
         <div className="min-h-0 flex-1">
           {gitRoot ? (
