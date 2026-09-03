@@ -1673,7 +1673,7 @@ export default function App() {
         {rightPanel && (
           <>
             <Resizer width={aiWidth} setWidth={setAiWidth} dir={-1} min={240} max={Math.max(560, window.innerWidth - 520)} onReset={() => setAiWidth(300)} />
-            <div className="shrink-0" style={{ width: aiWidth }}>
+            <div className="h-full min-h-0 shrink-0 overflow-hidden" style={{ width: aiWidth }}>
               {rightPanel === "review" ? (
                 <AiPanel
                   file={active && !active.loading ? { path: active.path, name: active.name, content: active.content } : null}
