@@ -179,6 +179,7 @@ export default function App() {
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [editingConfigs, setEditingConfigs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [gotoLine, setGotoLine] = useState(false);
   const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies">("project");
 
   // Apply persisted AI model + toolchain overrides to the backend on startup.
@@ -1260,6 +1261,7 @@ export default function App() {
       { id: "debug.view-breakpoints", group: "Debug", title: "View Breakpoints", disabled: !project, disabledReason: noProject, run: () => { setOutputHidden(false); setOutputTab("breakpoints"); } },
       { id: "debug.toggle-all-breakpoints", group: "Debug", title: bpAnyEnabled ? "Disable All Breakpoints" : "Enable All Breakpoints", disabled: bpCount === 0, disabledReason: "No breakpoints", run: () => setAllBreakpointsEnabled(!bpAnyEnabled) },
       { id: "debug.remove-all-breakpoints", group: "Debug", title: "Remove All Breakpoints", disabled: bpCount === 0, disabledReason: "No breakpoints", run: () => removeAllBreakpoints() },
+      { id: "code.goto-line", group: "Code", title: "Go to Line…", hint: "⌃G", disabled: !active, disabledReason: "Open a file", run: () => setGotoLine(true) },
       { id: "code.fold", group: "Code", title: "Fold at Cursor", hint: "⌘⌥[", disabled: foldDisabled, disabledReason: "Open a code file", run: () => activeEditor()?.foldAtCursor() },
       { id: "code.unfold", group: "Code", title: "Unfold at Cursor", hint: "⌘⌥]", disabled: foldDisabled, disabledReason: "Open a code file", run: () => activeEditor()?.unfoldAtCursor() },
       { id: "code.fold-all", group: "Code", title: "Fold All", disabled: foldDisabled, disabledReason: "Open a code file", run: () => activeEditor()?.foldAll() },
@@ -1303,6 +1305,12 @@ export default function App() {
       if (c && !c.disabled) c.run();
     };
     const h = (e: KeyboardEvent) => {
+      // Go to Line — ⌃G (Ctrl+G), no other modifiers.
+      if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        setGotoLine(true);
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
       const key = e.key.toLowerCase();
       if (key === "p") {
@@ -1750,6 +1758,14 @@ export default function App() {
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
 
+      {gotoLine && active && (
+        <GoToLineDialog
+          totalLines={Math.max(1, (active.content.match(/\n/g)?.length ?? 0) + 1)}
+          onGo={(line, col) => { activeEditor()?.goTo(line, col); setGotoLine(false); }}
+          onClose={() => setGotoLine(false)}
+        />
+      )}
+
       {structureOpen && project && (
         <ProjectSettingsDialog
           rootPath={project.path}
@@ -1876,6 +1892,39 @@ function SearchIcon() {
       <circle cx="11" cy="11" r="7" />
       <path d="M21 21l-4.3-4.3" />
     </svg>
+  );
+}
+
+/** Small "Go to Line" prompt: accepts `line` or `line:column`, ⏎ to jump. */
+function GoToLineDialog({ totalLines, onGo, onClose }: { totalLines: number; onGo: (line: number, col: number) => void; onClose: () => void }) {
+  const [value, setValue] = useState("");
+  const submit = () => {
+    const m = /^\s*(\d+)\s*(?::\s*(\d+))?\s*$/.exec(value);
+    if (!m) return;
+    const line = Math.min(Math.max(parseInt(m[1], 10), 1), totalLines);
+    const col = m[2] ? Math.max(parseInt(m[2], 10), 1) : 1;
+    onGo(line, col);
+  };
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/20" onClick={onClose}>
+      <div className="switch-dialog mt-[18vh] w-[min(360px,86vw)] rounded-xl p-3.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-2 text-[13px] font-semibold text-[var(--text-primary)]">Go to Line</div>
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); submit(); }
+            else if (e.key === "Escape") { e.preventDefault(); onClose(); }
+          }}
+          placeholder={`Line (1–${totalLines}), or line:column`}
+          className="field w-full px-2.5 py-2 font-mono text-[12.5px]"
+        />
+        <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+          Enter a line number, or <code className="font-mono">line:column</code>. ⏎ to jump, Esc to cancel.
+        </p>
+      </div>
+    </div>
   );
 }
 
