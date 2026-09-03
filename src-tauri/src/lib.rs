@@ -263,16 +263,6 @@ pub fn run() {
                 .item(&close_window)
                 .build()?;
 
-            let manage_subscription = MenuItem::with_id(
-                handle,
-                "help.subscription",
-                "Manage Subscription…",
-                true,
-                None::<&str>,
-            )?;
-            let help_menu =
-                SubmenuBuilder::new(handle, "Help").item(&manage_subscription).build()?;
-
             Menu::with_items(
                 handle,
                 &[
@@ -285,7 +275,6 @@ pub fn run() {
                     &view_menu,
                     &project_menu,
                     &window_menu,
-                    &help_menu,
                 ],
             )
         })
@@ -375,7 +364,6 @@ pub fn run() {
             commands::search_crates,
             commands::cargo_add,
             commands::log_client,
-            commands::activate_license,
             commands::nudge_window,
             commands::close_splashscreen,
             commands::project_info,

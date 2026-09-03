@@ -5,14 +5,10 @@ interface Props {
   file: { name: string; content: string } | null;
   branch: string | null;
   cursor: { line: number; col: number };
-  /** Whether a valid license is active. */
-  licensed: boolean;
-  /** Open Help ▸ Manage Subscription. */
-  onManageSubscription?: () => void;
 }
 
 /** VS Code-style status bar shown beneath the editor. */
-export default function StatusBar({ file, branch, cursor, licensed, onManageSubscription }: Props) {
+export default function StatusBar({ file, branch, cursor }: Props) {
   const indent = useMemo(() => detectIndent(file?.content ?? ""), [file?.content]);
   const lang = file ? langOf(file.name) : "";
 
@@ -36,32 +32,8 @@ export default function StatusBar({ file, branch, cursor, licensed, onManageSubs
             {lang && <span>{lang}</span>}
           </>
         )}
-
-        <button
-          type="button"
-          onClick={onManageSubscription}
-          title={licensed ? "License active — manage subscription" : "Unlicensed — click to activate your license"}
-          className={
-            "flex items-center gap-1 rounded px-1 " +
-            (licensed
-              ? "hover:text-[var(--text-secondary)]"
-              : "font-medium text-[var(--warn,#b45309)] hover:opacity-80")
-          }
-        >
-          <KeyIcon />
-          {licensed ? "Licensed" : "Unlicensed"}
-        </button>
       </div>
     </footer>
-  );
-}
-
-function KeyIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="4" />
-      <path d="M10.8 10.8 L20 20 M17 17l2-2 M14 14l2-2" />
-    </svg>
   );
 }
 

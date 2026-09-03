@@ -22,8 +22,6 @@ import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
 import RunConfigDialog from "./components/RunConfigDialog";
 import SettingsDialog, { loadModel, loadToolchainDir } from "./components/SettingsDialog";
-import SubscriptionDialog from "./components/SubscriptionDialog";
-import { activateLicense, loadLicense, saveLicense, type LicenseStatus } from "./lib/license";
 import {
   loadConfigs,
   saveConfigs,
@@ -181,20 +179,7 @@ export default function App() {
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [editingConfigs, setEditingConfigs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showSubscription, setShowSubscription] = useState(false);
-  const [license, setLicense] = useState<LicenseStatus>(loadLicense);
   const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies">("project");
-
-  // Persist license state and, on startup, re-validate a stored email online so
-  // an expired/revoked subscription doesn't stay "licensed" forever.
-  useEffect(() => { saveLicense(license); }, [license]);
-  useEffect(() => {
-    if (!license.email) return;
-    activateLicense(license.email)
-      .then((s) => setLicense(s))
-      .catch(() => { /* offline: keep last known state */ });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Apply persisted AI model + toolchain overrides to the backend on startup.
   useEffect(() => {
@@ -1260,7 +1245,6 @@ export default function App() {
       { id: "run.edit", group: "Run", title: "Edit Run Configurations…", disabled: !project, disabledReason: noProject, run: () => setEditingConfigs(true) },
       { id: "app.settings", group: "View", title: "Settings…", hint: "⌘,", run: () => setShowSettings(true) },
       { id: "project.settings", group: "View", title: "Project Settings…", disabled: !project, disabledReason: noProject, run: () => setStructureOpen(true) },
-      { id: "help.subscription", group: "Help", title: "Manage Subscription…", run: () => setShowSubscription(true) },
       { id: "cargo.test", group: "Build", title: "Test (all)", hint: "⌘U", disabled: !project, disabledReason: noProject, run: () => void runCargo("test") },
       { id: "cargo.clippy", group: "Build", title: "Check", hint: "⌘L", disabled: !project, disabledReason: noProject, run: () => void runCargo("clippy") },
       { id: "cargo.check", group: "Code", title: "Code Analysis", hint: "⌘⇧B", disabled: !project, disabledReason: noProject, run: () => void runCargo("check") },
@@ -1351,13 +1335,6 @@ export default function App() {
       <>
         <ProjectLauncher onOpen={chooseProject} />
         {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
-        {showSubscription && (
-          <SubscriptionDialog
-            current={license}
-            onClose={() => setShowSubscription(false)}
-            onActivated={setLicense}
-          />
-        )}
       </>
     );
   }
@@ -1739,8 +1716,6 @@ export default function App() {
         file={active && !active.loading ? { name: active.name, content: active.content } : null}
         branch={branch ?? null}
         cursor={cursor}
-        licensed={license.licensed}
-        onManageSubscription={() => setShowSubscription(true)}
       />
 
       {quickOpen && (
@@ -1794,14 +1769,6 @@ export default function App() {
             setStructureOpen(false);
           }}
           onClose={() => setStructureOpen(false)}
-        />
-      )}
-
-      {showSubscription && (
-        <SubscriptionDialog
-          current={license}
-          onClose={() => setShowSubscription(false)}
-          onActivated={setLicense}
         />
       )}
 

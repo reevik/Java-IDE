@@ -2658,39 +2658,4 @@ pub async fn debug_stop(dap: State<'_, DapState>) -> Result<(), String> {
     Ok(())
 }
 
-// --- License / subscription -------------------------------------------------
-
-const LICENSE_API_URL: &str = "https://ryos.io/api/license/activate";
-
-/// Result of a license activation check. Mirrors the JSON returned by the
-/// reevik.net `/license/activate` endpoint.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct LicenseStatus {
-    pub licensed: bool,
-    pub email: Option<String>,
-    /// "active" | "not_found" | "unverified" | "invalid_email"
-    pub status: String,
-}
-
-/// Activate a license online against the reevik.net API. A license is a
-/// verified newsletter subscriber, keyed by email. This runs in Rust rather
-/// than the webview so it is not subject to browser CORS on the API, and the
-/// email travels in the POST body (never the URL).
-#[tauri::command]
-pub async fn activate_license(email: String) -> Result<LicenseStatus, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .post(LICENSE_API_URL)
-        .json(&serde_json::json!({ "email": email.trim() }))
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach the licensing server: {e}"))?;
-    let status = resp.status();
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    serde_json::from_str::<LicenseStatus>(&text)
-        .map_err(|_| format!("Unexpected response ({status}) from the licensing server"))
-}
 
