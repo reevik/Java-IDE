@@ -145,9 +145,6 @@ export default function OutputPanel({
               {lastResult.code === 0 ? "✓" : "✗"} {runLabel(command)} · {lastResult.secs.toFixed(1)}s
             </span>
           ) : null}
-          <button onClick={onClear} className="btn-bezel px-2 py-0.5 text-[11px]">
-            Clear
-          </button>
         </span>
       </header>
 
