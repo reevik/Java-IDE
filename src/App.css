@@ -1446,10 +1446,15 @@ select.field option {
 .cm-change-gutter .cm-gutterElement {
   padding: 0;
 }
+/* A change bar is clickable (opens the hunk peek) — show it. */
+.cm-change-gutter .cm-gutterElement:has(.cm-change-bar) {
+  cursor: pointer;
+}
 .cm-change-bar {
   width: 3px;
   height: 100%;
   min-height: 1em;
+  cursor: pointer;
 }
 .cm-change-added {
   background: #3fb950;
@@ -1656,7 +1661,9 @@ select.field option {
 .hunk-peek-kind.hunk-added { color: #22a06b; }
 .hunk-peek-kind.hunk-modified { color: #b8860b; }
 .hunk-peek-kind.hunk-deleted { color: #d1453b; }
-.hunk-peek-actions { margin-left: auto; display: flex; gap: 4px; }
+.hunk-peek-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.hunk-peek-pos { font-size: 10.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; padding: 0 2px; }
+.hunk-peek-sep { width: 1px; align-self: stretch; margin: 2px 2px; background: var(--line); }
 .hunk-peek-btn {
   padding: 2px 8px;
   border-radius: 6px;

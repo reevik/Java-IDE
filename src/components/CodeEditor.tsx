@@ -1159,6 +1159,40 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     return () => window.removeEventListener("keydown", h);
   }, [hunkPeek]);
 
+  /** All hunks, sorted top-to-bottom — for the peek's prev/next navigation. */
+  const sortedHunks = (): ChangeMarker[] => {
+    const v = view.current;
+    return v ? [...v.state.field(changeMarkersData)].sort((a, b) => a.start_line - b.start_line) : [];
+  };
+  const hunkIndex = (peek: typeof hunkPeek): number => {
+    if (!peek) return -1;
+    return sortedHunks().findIndex((m) => m.start_line === peek.marker.start_line && m.kind === peek.marker.kind);
+  };
+  /** Jump to the previous/next hunk: scroll it into view and move the peek there. */
+  const navigateHunk = (dir: 1 | -1) => {
+    const v = view.current;
+    if (!v || !hunkPeek) return;
+    const markers = sortedHunks();
+    if (markers.length === 0) return;
+    const cur = hunkIndex(hunkPeek);
+    const idx = Math.max(0, Math.min(markers.length - 1, (cur < 0 ? 0 : cur) + dir));
+    const target = markers[idx];
+    const doc = v.state.doc;
+    const lineFrom = doc.line(Math.min(Math.max(target.start_line, 1), doc.lines)).from;
+    v.dispatch({ selection: { anchor: lineFrom }, effects: EditorView.scrollIntoView(lineFrom, { y: "center" }) });
+    // Reposition the peek after the scroll settles.
+    requestAnimationFrame(() => {
+      const top = v.coordsAtPos(lineFrom)?.top ?? 100;
+      const gutter = v.dom.querySelector(".cm-change-gutter") as HTMLElement | null;
+      const left = (gutter?.getBoundingClientRect().right ?? 60) + 12;
+      const newText =
+        target.kind === "deleted"
+          ? ""
+          : doc.sliceString(doc.line(target.start_line).from, doc.line(Math.min(target.end_line, doc.lines)).to);
+      openPeekRef.current(target, newText, top, left);
+    });
+  };
+
   // --- Quick fixes (⌥⏎): rust-analyzer code actions in a caret popup ----------
   const [quickFix, setQuickFix] = useState<{ x: number; y: number; actions: CodeAction[]; index: number } | null>(null);
   const qfMenuRef = useRef<HTMLDivElement>(null);
@@ -1752,6 +1786,26 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
                   {hunkPeek.marker.kind === "added" ? "Added" : hunkPeek.marker.kind === "deleted" ? "Deleted" : "Modified"}
                 </span>
                 <div className="hunk-peek-actions">
+                  <button
+                    type="button"
+                    className="hunk-peek-btn"
+                    title="Previous change (in this file)"
+                    disabled={hunkIndex(hunkPeek) <= 0}
+                    onClick={() => navigateHunk(-1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="hunk-peek-btn"
+                    title="Next change (in this file)"
+                    disabled={hunkIndex(hunkPeek) >= sortedHunks().length - 1}
+                    onClick={() => navigateHunk(1)}
+                  >
+                    ↓
+                  </button>
+                  <span className="hunk-peek-pos">{hunkIndex(hunkPeek) + 1}/{sortedHunks().length}</span>
+                  <span className="hunk-peek-sep" />
                   <button
                     type="button"
                     className="hunk-peek-btn"
