@@ -1629,6 +1629,58 @@ select.field option {
 
 /* Quick-fix / assist menu (⌥⏎), portalled to <body> so it escapes the editor
    clip + the backdrop-filtered pane (which breaks position:fixed for children). */
+/* Git hunk peek (click a gutter change bar) */
+.hunk-peek {
+  width: min(520px, 70vw);
+  border-radius: 10px;
+  background: var(--menu-bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 14px 36px -10px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  font-size: 12px;
+}
+.hunk-peek-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.hunk-peek-kind {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.hunk-peek-kind.hunk-added { color: #22a06b; }
+.hunk-peek-kind.hunk-modified { color: #b8860b; }
+.hunk-peek-kind.hunk-deleted { color: #d1453b; }
+.hunk-peek-actions { margin-left: auto; display: flex; gap: 4px; }
+.hunk-peek-btn {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  border: 1px solid var(--line);
+  background: var(--control-bg);
+}
+.hunk-peek-btn:hover:not(:disabled) { background: var(--hover); color: var(--text-primary); }
+.hunk-peek-btn:disabled { opacity: 0.5; }
+.hunk-peek-body {
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.hunk-line { padding: 0 10px; }
+.hunk-sign { display: inline-block; width: 1.2em; color: var(--text-tertiary); }
+.hunk-del { background: color-mix(in srgb, #d1453b 12%, transparent); }
+.hunk-add { background: color-mix(in srgb, #22a06b 12%, transparent); }
+
 .qf-menu {
   position: fixed;
   z-index: 60;

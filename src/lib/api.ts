@@ -194,11 +194,18 @@ export interface ChangeMarker {
   start_line: number;
   end_line: number;
   kind: "added" | "modified" | "deleted";
+  /** The committed (HEAD) text this hunk replaced — for the peek diff + Revert. */
+  old_text: string;
 }
 
 /** Per-line git change markers for `text` vs the file's committed (HEAD) version. */
 export function gitDiff(root: string, path: string, text: string): Promise<ChangeMarker[]> {
   return invoke("git_diff", { root, path, text });
+}
+
+/** Stage a file's working-tree contents (`git add <path>`). */
+export function gitStageFile(root: string, path: string): Promise<void> {
+  return invoke("git_stage_file", { root, path });
 }
 
 export interface GitCommit {

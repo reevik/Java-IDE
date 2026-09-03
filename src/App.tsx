@@ -1410,6 +1410,10 @@ export default function App() {
         onFindUsages={showUsages}
         onRename={applyRename}
         agentActive={agentActive}
+        onStaged={() => {
+          qc.invalidateQueries({ queryKey: ["git-status"] });
+          qc.invalidateQueries({ queryKey: ["git-log"] });
+        }}
         onExplainDiagnostic={(message, snippet) => {
           setRightPanel("chat");
           const prompt = `Explain this Java diagnostic and how to fix it:\n\n> ${message}\n\n\`\`\`java\n${snippet}\n\`\`\``;

@@ -1382,6 +1382,9 @@ pub struct ChangeMarker {
     pub end_line: u32,
     /// "added" | "modified" | "deleted"
     pub kind: &'static str,
+    /// The committed (HEAD) text this hunk replaced — for the peek diff and
+    /// Revert. Empty for a pure addition; the removed lines for a deletion.
+    pub old_text: String,
 }
 
 /// A file's committed (HEAD) contents plus when we last fetched them from git.
@@ -1409,6 +1412,29 @@ pub fn git_diff(
     match head_blob(&path, &state) {
         Some(head) => Ok(diff_markers(&head, &text)),
         None => Ok(vec![]), // not inside a git repo
+    }
+}
+
+/// Stage a file's current working-tree contents (`git add <path>`). Used by the
+/// gutter hunk peek's Stage action. (Per-file, not per-hunk.)
+#[tauri::command]
+pub fn git_stage_file(root: String, path: String, state: State<'_, AppState>) -> Result<(), String> {
+    ensure_within_projects(&PathBuf::from(&root), &state)?;
+    let file = PathBuf::from(&path);
+    let git_root = find_git_root(file.parent().ok_or("no parent")?).ok_or("not a git repository")?;
+    let rel = file.strip_prefix(&git_root).map_err(|_| "file outside the repo")?;
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&git_root)
+        .arg("add")
+        .arg("--")
+        .arg(rel)
+        .output()
+        .map_err(|e| format!("running git add: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
 }
 
@@ -1494,6 +1520,7 @@ fn diff_markers(old: &str, new: &str) -> Vec<ChangeMarker> {
                     start_line: s as u32 + 1,
                     end_line: e as u32,
                     kind: "added",
+                    old_text: String::new(),
                 });
                 floor_new = e;
                 floor_old = or.end;
@@ -1503,6 +1530,7 @@ fn diff_markers(old: &str, new: &str) -> Vec<ChangeMarker> {
                     start_line: nr.start as u32 + 1,
                     end_line: nr.end as u32,
                     kind: "modified",
+                    old_text: old_lines[or.start..or.end].join("\n"),
                 });
                 floor_new = nr.end;
                 floor_old = or.end;
@@ -1518,6 +1546,7 @@ fn diff_markers(old: &str, new: &str) -> Vec<ChangeMarker> {
                     start_line: anchor,
                     end_line: anchor,
                     kind: "deleted",
+                    old_text: old_lines[ds..de].join("\n"),
                 });
                 floor_new = nr.end;
                 floor_old = de;

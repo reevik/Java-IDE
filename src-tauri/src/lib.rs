@@ -416,6 +416,7 @@ pub fn run() {
             commands::git_revert,
             commands::git_reset,
             commands::git_diff,
+            commands::git_stage_file,
             commands::debugger_adapter,
             commands::debug_start,
             commands::debug_set_breakpoints,

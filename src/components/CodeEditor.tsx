@@ -49,7 +49,7 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { tags as t } from "@lezer/highlight";
-import { codeAction, gitDiff, lspCompletion, lspDefinition, lspHover, lspReferences, lspRename, type CodeAction, type FileEdit, type Reference } from "../lib/api";
+import { codeAction, gitDiff, gitStageFile, lspCompletion, lspDefinition, lspHover, lspReferences, lspRename, type CodeAction, type FileEdit, type Reference } from "../lib/api";
 import type { ChangeMarker } from "../lib/api";
 import type { Breakpoint, LspDiagnostic } from "../lib/types";
 
@@ -147,10 +147,60 @@ const changeBarsField = StateField.define<RangeSet<GutterMarker>>({
   },
 });
 
-const changeBarGutter = gutter({
-  class: "cm-change-gutter",
-  markers: (view) => view.state.field(changeBarsField),
+/** The raw hunk data (kept alongside the gutter markers) so a click can look up
+ *  the hunk's kind + committed text. Line numbers refresh with each diff. */
+const changeMarkersData = StateField.define<ChangeMarker[]>({
+  create: () => [],
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setChangeBars)) return e.value;
+    return value;
+  },
 });
+
+/** Clicking a change bar opens a peek of the hunk (via the onPeek bridge). */
+function changeBarGutter(onPeek: (m: ChangeMarker, newText: string, top: number, left: number) => void) {
+  return gutter({
+    class: "cm-change-gutter",
+    markers: (view) => view.state.field(changeBarsField),
+    domEventHandlers: {
+      mousedown(view, line, event) {
+        const e = event as MouseEvent;
+        if (e.button !== 0) return false;
+        const lineNo = view.state.doc.lineAt(line.from).number;
+        const hit = view.state.field(changeMarkersData).find((m) => lineNo >= m.start_line && lineNo <= m.end_line);
+        if (!hit) return false;
+        e.preventDefault();
+        const doc = view.state.doc;
+        const newText =
+          hit.kind === "deleted"
+            ? ""
+            : doc.sliceString(doc.line(hit.start_line).from, doc.line(Math.min(hit.end_line, doc.lines)).to);
+        const top = view.coordsAtPos(doc.line(hit.start_line).from)?.top ?? e.clientY;
+        onPeek(hit, newText, top, e.clientX);
+        return true;
+      },
+    },
+  });
+}
+
+/** Revert a hunk to its committed (HEAD) text, in-buffer (no git write). */
+function revertHunk(view: EditorView, m: ChangeMarker) {
+  const doc = view.state.doc;
+  const s = Math.min(Math.max(m.start_line, 1), doc.lines);
+  const e = Math.min(Math.max(m.end_line, 1), doc.lines);
+  if (m.kind === "added") {
+    // Remove the added lines (and one adjoining newline so no blank line lingers).
+    const from = e < doc.lines ? doc.line(s).from : s > 1 ? doc.line(s - 1).to : doc.line(s).from;
+    const to = e < doc.lines ? doc.line(e + 1).from : doc.line(e).to;
+    view.dispatch({ changes: { from, to, insert: "" }, scrollIntoView: true });
+  } else if (m.kind === "modified") {
+    view.dispatch({ changes: { from: doc.line(s).from, to: doc.line(e).to, insert: m.old_text }, scrollIntoView: true });
+  } else {
+    // Deleted: re-insert the removed lines at the anchor.
+    const at = doc.line(s).from;
+    view.dispatch({ changes: { from: at, to: at, insert: `${m.old_text}\n` }, scrollIntoView: true });
+  }
+}
 
 /** Debounced diff of the live buffer vs HEAD, pushed into `changeBarsField`. */
 function gitChangeBars(root: string, path: string) {
@@ -802,6 +852,8 @@ interface Props {
   onRename?: (edits: FileEdit[]) => void;
   /** The AI agent is running — show the "You" caret label (collaborative mode). */
   agentActive?: boolean;
+  /** Called after the gutter peek stages the file, so the Git panel can refresh. */
+  onStaged?: () => void;
 }
 
 /** Convert rust-analyzer's 0-based diagnostics into CodeMirror lint diagnostics. */
@@ -1048,6 +1100,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     onFindUsages,
     onRename,
     agentActive,
+    onStaged,
   },
   ref,
 ) {
@@ -1088,6 +1141,23 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   onFindUsagesRef.current = onFindUsages;
   const onRenameRef = useRef(onRename);
   onRenameRef.current = onRename;
+  const onStagedRef = useRef(onStaged);
+  onStagedRef.current = onStaged;
+
+  // --- Git hunk peek: click a change bar → floating diff + Revert/Stage -------
+  const [hunkPeek, setHunkPeek] = useState<{ marker: ChangeMarker; newText: string; top: number; left: number } | null>(null);
+  const [staged, setStaged] = useState(false);
+  const openPeekRef = useRef<(m: ChangeMarker, newText: string, top: number, left: number) => void>(() => {});
+  openPeekRef.current = (marker, newText, top, left) => {
+    setStaged(false);
+    setHunkPeek({ marker, newText, top, left });
+  };
+  useEffect(() => {
+    if (!hunkPeek) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") { setHunkPeek(null); view.current?.focus(); } };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [hunkPeek]);
 
   // --- Quick fixes (⌥⏎): rust-analyzer code actions in a caret popup ----------
   const [quickFix, setQuickFix] = useState<{ x: number; y: number; actions: CodeAction[]; index: number } | null>(null);
@@ -1432,7 +1502,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         codeFolding(),
         foldGutter({ openText: "⌄", closedText: "›" }),
         changeBarsField,
-        changeBarGutter,
+        changeMarkersData,
+        changeBarGutter((m, newText, top, left) => openPeekRef.current?.(m, newText, top, left)),
         ...(root ? [gitChangeBars(root, path)] : []),
         highlightActiveLine(),
         lintGutter(),
@@ -1665,6 +1736,69 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
               ))
             )}
           </div>,
+          document.body,
+        )}
+      {hunkPeek &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[59]" onMouseDown={() => setHunkPeek(null)} />
+            <div
+              className="hunk-peek fixed z-[60]"
+              style={{ top: Math.max(8, hunkPeek.top - 6), left: hunkPeek.left + 10 }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="hunk-peek-head">
+                <span className={`hunk-peek-kind hunk-${hunkPeek.marker.kind}`}>
+                  {hunkPeek.marker.kind === "added" ? "Added" : hunkPeek.marker.kind === "deleted" ? "Deleted" : "Modified"}
+                </span>
+                <div className="hunk-peek-actions">
+                  <button
+                    type="button"
+                    className="hunk-peek-btn"
+                    title="Revert this hunk to the committed version"
+                    onClick={() => { if (view.current) revertHunk(view.current, hunkPeek.marker); setHunkPeek(null); view.current?.focus(); }}
+                  >
+                    Revert
+                  </button>
+                  <button
+                    type="button"
+                    className="hunk-peek-btn"
+                    disabled={!root || staged}
+                    title="Stage this file (git add)"
+                    onClick={() => { if (root) void gitStageFile(root, path).then(() => { setStaged(true); onStagedRef.current?.(); }).catch(() => {}); }}
+                  >
+                    {staged ? "Staged ✓" : "Stage file"}
+                  </button>
+                  {hunkPeek.marker.old_text && (
+                    <button
+                      type="button"
+                      className="hunk-peek-btn"
+                      title="Copy the committed text"
+                      onClick={() => void navigator.clipboard?.writeText(hunkPeek.marker.old_text)}
+                    >
+                      Copy
+                    </button>
+                  )}
+                  <button type="button" className="hunk-peek-btn" title="Close (Esc)" onClick={() => setHunkPeek(null)}>✕</button>
+                </div>
+              </div>
+              <div className="hunk-peek-body">
+                {hunkPeek.marker.old_text
+                  ? hunkPeek.marker.old_text.split("\n").map((l, i) => (
+                      <div key={`o${i}`} className="hunk-line hunk-del"><span className="hunk-sign">−</span>{l || " "}</div>
+                    ))
+                  : null}
+                {hunkPeek.newText
+                  ? hunkPeek.newText.split("\n").map((l, i) => (
+                      <div key={`n${i}`} className="hunk-line hunk-add"><span className="hunk-sign">+</span>{l || " "}</div>
+                    ))
+                  : null}
+                {!hunkPeek.marker.old_text && !hunkPeek.newText && (
+                  <div className="hunk-line"><span className="hunk-sign"> </span>(empty)</div>
+                )}
+              </div>
+            </div>
+          </>,
           document.body,
         )}
     </>
