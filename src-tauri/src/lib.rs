@@ -406,6 +406,7 @@ pub fn run() {
             commands::git_diff,
             commands::git_stage_file,
             commands::debugger_adapter,
+            commands::install_java_debug,
             commands::debug_start,
             commands::debug_set_breakpoints,
             commands::debug_continue,

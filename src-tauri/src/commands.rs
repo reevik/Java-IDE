@@ -2492,6 +2492,70 @@ pub fn debugger_adapter() -> Option<String> {
     crate::lsp::find_java_debug_bundle().map(|p| p.to_string_lossy().into_owned())
 }
 
+/// Download Microsoft's java-debug plugin (from the official "Debugger for Java"
+/// extension on Open VSX) and install just its plugin jar into
+/// `~/.local/share/java-debug/`, where the IDE auto-detects it. Returns the jar
+/// path. A no-op (returns the existing path) when already installed.
+#[tauri::command]
+pub async fn install_java_debug() -> Result<String, String> {
+    if let Some(p) = crate::lsp::find_java_debug_bundle() {
+        return Ok(p.to_string_lossy().into_owned());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 1. Resolve the latest VSIX download URL.
+    let meta: serde_json::Value = client
+        .get("https://open-vsx.org/api/vscjava/vscode-java-debug/latest")
+        .send()
+        .await
+        .map_err(|e| format!("fetching extension metadata: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("parsing metadata: {e}"))?;
+    let url = meta
+        .get("files")
+        .and_then(|f| f.get("download"))
+        .and_then(|d| d.as_str())
+        .ok_or("no download URL in the extension metadata")?;
+
+    // 2. Download the .vsix (a zip) to a temp file.
+    let bytes = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("downloading java-debug: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| e.to_string())?;
+    let tmp = std::env::temp_dir().join("vscode-java-debug.vsix");
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("writing download: {e}"))?;
+
+    // 3. Extract only the plugin jar (flat) into the auto-detected directory.
+    let home = std::env::var("HOME").map_err(|_| "no HOME directory")?;
+    let dest = PathBuf::from(&home).join(".local/share/java-debug");
+    std::fs::create_dir_all(&dest).map_err(|e| format!("creating {}: {e}", dest.display()))?;
+    let out = std::process::Command::new("unzip")
+        .arg("-o")
+        .arg("-j") // junk paths: land the jar directly in dest
+        .arg(&tmp)
+        .arg("extension/server/com.microsoft.java.debug.plugin-*.jar")
+        .arg("-d")
+        .arg(&dest)
+        .output()
+        .map_err(|e| format!("running unzip: {e}"))?;
+    let _ = std::fs::remove_file(&tmp);
+    if !out.status.success() {
+        return Err(format!("extracting the plugin failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+
+    crate::lsp::find_java_debug_bundle()
+        .map(|p| p.to_string_lossy().into_owned())
+        .ok_or_else(|| "installed, but the plugin jar wasn't found afterward".into())
+}
+
 /// Compile the project, then launch the chosen main class under java-debug with the
 /// given breakpoints. The DAP server runs inside the JDT language server: we ask it
 /// to start a session (a TCP port) and resolve the launch classpath, then connect.

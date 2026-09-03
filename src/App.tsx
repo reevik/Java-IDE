@@ -1639,6 +1639,10 @@ export default function App() {
                     onStop: () => void stopDebug(),
                     onSelectFrame: selectFrame,
                     onEval: evalExpr,
+                    onInstalled: () => {
+                      qc.invalidateQueries({ queryKey: ["debugger-adapter"] });
+                      qc.invalidateQueries({ queryKey: ["tool-paths"] });
+                    },
                   }}
                   usages={usages}
                   usagesRoot={project.path}

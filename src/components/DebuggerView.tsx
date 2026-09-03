@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { debugScopes, debugVariables, type Scope, type StackFrame, type Variable } from "../lib/api";
+import { debugScopes, debugVariables, installJavaDebug, type Scope, type StackFrame, type Variable } from "../lib/api";
 import Resizer from "./Resizer";
 
 function persistedWidth(key: string, fallback: number) {
@@ -31,6 +31,8 @@ export interface DebugProps {
   onStop: () => void;
   onSelectFrame: (frame: StackFrame) => void;
   onEval: (expr: string) => void;
+  /** Re-check availability after the java-debug plugin is installed. */
+  onInstalled?: () => void;
 }
 
 const STATUS_LABEL: Record<DebugStatus, string> = {
@@ -41,28 +43,57 @@ const STATUS_LABEL: Record<DebugStatus, string> = {
   exited: "Exited",
 };
 
+/** Shown when java-debug is missing: explanation + one-click install. */
+function DebuggerUnavailable({ onInstalled, toolbar }: { onInstalled?: () => void; toolbar: React.ReactNode }) {
+  const [state, setState] = useState<"idle" | "installing" | "done" | "error">("idle");
+  const [err, setErr] = useState("");
+  const install = async () => {
+    setState("installing");
+    setErr("");
+    try {
+      await installJavaDebug();
+      setState("done");
+      onInstalled?.(); // re-check availability
+    } catch (e) {
+      setErr(String(e));
+      setState("error");
+    }
+  };
+  return (
+    <div className="flex h-full flex-col">
+      {toolbar}
+      <div className="m-3 max-w-xl rounded-lg border border-[color:var(--line)] bg-[var(--surface-2)] p-3 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+        <p className="mb-1.5 font-medium text-[var(--text-primary)]">java-debug plugin not found</p>
+        <p>
+          Java debugging runs inside the language server via Microsoft's{" "}
+          <code className="font-mono">java-debug</code> plugin. Install it with one click — the IDE downloads the
+          official “Debugger for Java” plugin and places it where it’s auto-detected.
+        </p>
+        <div className="mt-2.5 flex items-center gap-2">
+          <button
+            onClick={() => void install()}
+            disabled={state === "installing"}
+            className="btn-accent px-3 py-1.5 text-[12px] disabled:opacity-60"
+          >
+            {state === "installing" ? "Installing…" : state === "done" ? "Installed ✓" : "Install java-debug"}
+          </button>
+          {state === "done" && <span className="text-[11px] text-green-700">Installed — reopen the project (or restart) so the language server loads it.</span>}
+        </div>
+        {state === "error" && <p className="mt-2 text-[11px] text-red-600">Install failed: {err}</p>}
+        <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+          It lands in <code className="font-mono">~/.local/share/java-debug/</code>. You can also set{" "}
+          <code className="font-mono">JAVA_DEBUG_BUNDLE</code> to a jar you already have.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /** The Debugger tab: controls, call stack, captured variables, and console —
  *  laid out horizontally for the bottom panel. */
 export default function DebuggerView(d: DebugProps) {
   if (!d.available) {
-    return (
-      <div className="flex h-full flex-col">
-        <Toolbar {...d} />
-        <div className="m-3 max-w-xl rounded-lg border border-[color:var(--line)] bg-[var(--surface-2)] p-3 text-[12px] leading-relaxed text-[var(--text-secondary)]">
-          <p className="mb-1.5 font-medium text-[var(--text-primary)]">java-debug plugin not found</p>
-          <p>
-            Java debugging runs inside the language server via Microsoft's{" "}
-            <code className="font-mono">java-debug</code> plugin. Install it (e.g. VS Code's “Debugger for Java”
-            extension, or build it from source), then point the IDE at its plugin jar and reopen the project:
-          </p>
-          <pre className="mt-2 w-fit whitespace-pre-wrap rounded bg-[var(--surface-2)] px-2 py-1 font-mono text-[11.5px]">export JAVA_DEBUG_BUNDLE=/path/to/com.microsoft.java.debug.plugin-VERSION.jar</pre>
-          <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
-            Or drop the jar in <code className="font-mono">~/.local/share/java-debug/</code>. It’s auto-detected
-            from there, from <code className="font-mono">~/.vscode/extensions</code>, and from mason.
-          </p>
-        </div>
-      </div>
-    );
+    return <DebuggerUnavailable onInstalled={d.onInstalled} toolbar={<Toolbar {...d} />} />;
   }
   return (
     <div className="flex h-full min-h-0 flex-col">

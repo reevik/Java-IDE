@@ -539,9 +539,14 @@ export interface EvalResult {
   variables_reference: number;
 }
 
-/** Path to the lldb-dap adapter, or null when the debugger isn't installed. */
+/** Path to the java-debug plugin jar, or null when the debugger isn't installed. */
 export function debuggerAdapter(): Promise<string | null> {
   return invoke("debugger_adapter");
+}
+
+/** Download + install the java-debug plugin; returns the installed jar path. */
+export function installJavaDebug(): Promise<string> {
+  return invoke("install_java_debug");
 }
 
 /** Build the chosen target and launch it under lldb-dap with the given breakpoints. */
