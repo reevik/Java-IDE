@@ -36,6 +36,7 @@ import {
   unfoldCode,
 } from "@codemirror/language";
 import { java } from "@codemirror/lang-java";
+import { xml } from "@codemirror/lang-xml";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
 import {
   autocompletion,
@@ -821,6 +822,11 @@ const highlightStyle = HighlightStyle.define([
   { tag: [t.operator, t.punctuation, t.bracket], color: "#475569" },
   { tag: t.meta, color: "#c2410c" }, // attributes: #[derive(...)]
   { tag: t.macroName, color: "#c2410c" },
+  // XML (pom.xml, …)
+  { tag: t.tagName, color: "#0369a1" },
+  { tag: t.attributeName, color: "#7c3aed" },
+  { tag: t.attributeValue, color: "#0a7d3c" },
+  { tag: [t.angleBracket, t.processingInstruction], color: "#94a3b8" },
 ]);
 
 // Brighter syntax palette for dark backgrounds.
@@ -835,6 +841,11 @@ const darkHighlightStyle = HighlightStyle.define([
   { tag: [t.operator, t.punctuation, t.bracket], color: "#9aa5b1" },
   { tag: t.meta, color: "#ff9e64" },
   { tag: t.macroName, color: "#ff9e64" },
+  // XML (pom.xml, …)
+  { tag: t.tagName, color: "#79c0ff" },
+  { tag: t.attributeName, color: "#d2a8ff" },
+  { tag: t.attributeValue, color: "#89e0a0" },
+  { tag: [t.angleBracket, t.processingInstruction], color: "#8b95a3" },
 ]);
 
 const themeSpec = {
@@ -1320,6 +1331,9 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
               }),
             ]
           : []),
+        // XML (pom.xml, settings.xml, …): highlighting + element folding come
+        // from lang-xml; the shared foldGutter above renders the chevrons.
+        ...(path.endsWith(".xml") ? [xml()] : []),
         ...(path.endsWith(".toml") ? [StreamLanguage.define(toml)] : []),
         themeComp.current.of(editorThemeExtensions()),
         EditorView.updateListener.of((u) => {
