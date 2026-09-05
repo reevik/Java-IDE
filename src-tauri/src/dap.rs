@@ -32,6 +32,27 @@ pub struct SourceBp {
     pub log_message: Option<String>,
 }
 
+/// Turn java-debug's raw launch-failure `message` into something actionable,
+/// calling out a busy debug port (the usual cause: a previous debuggee still
+/// running) with guidance the raw message doesn't give.
+fn describe_launch_error(msg: &str) -> String {
+    let low = msg.to_ascii_lowercase();
+    let port_busy = low.contains("address already in use")
+        || low.contains("bindexception")
+        || low.contains("already in use")
+        || low.contains("failed to attach")
+        || (low.contains("port") && low.contains("in use"));
+    if port_busy {
+        format!(
+            "the debug port is already in use — a previous debug session is probably still \
+             running. Stop it (the ■ Stop button, or kill the leftover Java process) and start \
+             debugging again.\n\nAdapter said: {msg}"
+        )
+    } else {
+        format!("launch failed: {msg}")
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct StackFrame {
     pub id: i64,
@@ -108,7 +129,21 @@ impl DapClient {
                     }
                 }
             }
-            s.with_context(|| format!("connecting to java-debug on 127.0.0.1:{port}: {last:?}"))?
+            match s {
+                Some(c) => c,
+                None => {
+                    let detail = last
+                        .as_ref()
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "no connection attempts made".into());
+                    bail!(
+                        "couldn't connect to the java-debug server on 127.0.0.1:{port} ({detail}). \
+                         The debug adapter didn't start listening. If a previous debug session is \
+                         still running, stop it (the ■ Stop button, or kill the leftover Java \
+                         process) and try again."
+                    );
+                }
+            }
         };
         let (read_half, write_half) = stream.into_split();
         let writer = Arc::new(tokio::sync::Mutex::new(write_half));
@@ -235,7 +270,7 @@ impl DapClient {
             Ok(Ok(resp)) if resp.get("success").and_then(Value::as_bool) == Some(true) => {}
             Ok(Ok(resp)) => {
                 let msg = resp.get("message").and_then(Value::as_str).unwrap_or("launch failed");
-                bail!("launch: {msg}");
+                bail!("{}", describe_launch_error(msg));
             }
             _ => bail!("launch timed out"),
         }
