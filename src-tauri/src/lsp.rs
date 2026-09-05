@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -45,6 +45,10 @@ pub struct LspClient {
     next_id: AtomicI64,
     version: AtomicI64,
     opened: StdMutex<HashSet<String>>,
+    /// Set once JDT.LS reports it has finished importing the project
+    /// (`language/status` `ServiceReady`). Main-class / classpath resolution only
+    /// returns results after this point.
+    ready: Arc<AtomicBool>,
     _child: Child,
 }
 
@@ -254,6 +258,7 @@ impl LspClient {
             Arc::new(StdMutex::new(HashMap::new()));
         let diagnostics: Arc<StdMutex<HashMap<String, Vec<Value>>>> =
             Arc::new(StdMutex::new(HashMap::new()));
+        let ready = Arc::new(AtomicBool::new(false));
 
         // Reader task: fulfil responses, answer server requests, forward diagnostics.
         {
@@ -261,6 +266,7 @@ impl LspClient {
             let writer = writer.clone();
             let app = app.clone();
             let diagnostics = diagnostics.clone();
+            let ready = ready.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stdout);
                 loop {
@@ -327,6 +333,18 @@ impl LspClient {
                             }
                             let _ = app.emit("lsp:diagnostics", params.clone());
                         }
+                    } else if msg.get("method").and_then(Value::as_str) == Some("language/status") {
+                        // JDT.LS import lifecycle: {type: "Starting"|"Started"|
+                        // "ServiceReady"|"ProjectStatus"|..., message}. ServiceReady
+                        // means the project model is built and main-class / classpath
+                        // resolution will return results.
+                        if let Some(params) = msg.get("params") {
+                            let kind = params.get("type").and_then(Value::as_str).unwrap_or("");
+                            if kind == "ServiceReady" || kind == "Started" {
+                                ready.store(true, Ordering::SeqCst);
+                            }
+                            let _ = app.emit("lsp:status", params.clone());
+                        }
                     }
                     // other notifications (progress, logs) are ignored.
                 }
@@ -341,6 +359,7 @@ impl LspClient {
             next_id: AtomicI64::new(1),
             version: AtomicI64::new(1),
             opened: StdMutex::new(HashSet::new()),
+            ready,
             _child: child,
         };
 
@@ -478,10 +497,14 @@ impl LspClient {
     /// `Err` carries a message describing why nothing matched.
     pub async fn resolve_launch_target(&self, desired: &str) -> Result<(String, String)> {
         let simple = desired.rsplit('.').next().unwrap_or(desired);
-        let mut last_len = 0usize;
-        for attempt in 0..12u32 {
+        // A cold Maven/Gradle import (first open, no cached workspace) resolves
+        // dependencies and builds the project model before any main class is
+        // known — that can take well over a minute. Wait generously, polling
+        // resolveMainClass until the list is populated.
+        let deadline = std::time::Instant::now() + Duration::from_secs(150);
+        let mut attempt = 0u32;
+        loop {
             let list = self.resolve_main_class().await.unwrap_or_default();
-            last_len = list.len();
             if !list.is_empty() {
                 let name_of = |m: &Value| m.get("mainClass").and_then(Value::as_str).map(str::to_string);
                 let proj_of = |m: &Value| m.get("projectName").and_then(Value::as_str).unwrap_or("").to_string();
@@ -502,11 +525,20 @@ impl LspClient {
                     if known.is_empty() { "(none)".into() } else { known.join(", ") }
                 );
             }
-            // Empty list → still importing. Back off and retry.
-            tokio::time::sleep(std::time::Duration::from_millis(if attempt < 3 { 400 } else { 900 })).await;
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            // Empty list → still importing. Back off (fast at first, then steady).
+            tokio::time::sleep(Duration::from_millis(if attempt < 4 { 400 } else { 1200 })).await;
+            attempt += 1;
+        }
+        if self.ready.load(Ordering::SeqCst) {
+            anyhow::bail!(
+                "no runnable main classes found in this project. Ensure the class has a `public static void main(String[])` and the file is under a source root (e.g. src/main/java)."
+            )
         }
         anyhow::bail!(
-            "the language server hasn't finished importing the project (no main classes resolved yet, last count {last_len}). Wait for indexing to finish and try again."
+            "the Java language server is still importing the project (this can take a minute on first open while dependencies download). Wait for indexing to finish, then try again."
         )
     }
 
