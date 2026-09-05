@@ -438,31 +438,114 @@ impl DapClient {
     }
 
     /// REPL completions for `text` with the caret at `column` (1-based, per DAP),
-    /// in the context of `frame_id`. Empty when the adapter has none.
+    /// in the context of `frame_id`.
+    ///
+    /// java-debug doesn't implement the DAP `completions` request (it always
+    /// returns an empty target list), so after trying it we derive completions
+    /// ourselves from the live debuggee: for `receiver.<prefix>` we evaluate the
+    /// receiver and list its fields; for a bare `<prefix>` we list the locals in
+    /// scope. Returns items carrying the `start`/`length` of the prefix so the
+    /// client replaces exactly that span.
     pub async fn completions(&self, frame_id: i64, text: &str, column: i64) -> Result<Vec<CompletionItem>> {
-        let body = self
+        // 1. Give the adapter a chance (future-proof: succeeds if it ever adds it).
+        if let Ok(body) = self
             .request(
                 "completions",
                 json!({ "frameId": frame_id, "text": text, "column": column }),
                 Duration::from_secs(6),
             )
-            .await?;
-        let targets = body.get("targets").and_then(Value::as_array).cloned().unwrap_or_default();
-        Ok(targets
-            .iter()
-            .map(|t| {
-                let label = t.get("label").and_then(Value::as_str).unwrap_or("").to_string();
-                let text = t.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| label.clone());
-                CompletionItem {
-                    label,
-                    text,
-                    kind: t.get("type").and_then(Value::as_str).map(str::to_string),
-                    start: t.get("start").and_then(Value::as_i64),
-                    length: t.get("length").and_then(Value::as_i64),
+            .await
+        {
+            let targets = body.get("targets").and_then(Value::as_array).cloned().unwrap_or_default();
+            if !targets.is_empty() {
+                return Ok(targets
+                    .iter()
+                    .filter_map(|t| {
+                        let label = t.get("label").and_then(Value::as_str)?.to_string();
+                        let text = t.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| label.clone());
+                        Some(CompletionItem {
+                            label,
+                            text,
+                            kind: t.get("type").and_then(Value::as_str).map(str::to_string),
+                            start: t.get("start").and_then(Value::as_i64),
+                            length: t.get("length").and_then(Value::as_i64),
+                        })
+                    })
+                    .collect());
+            }
+        }
+
+        // 2. Derive completions from the debuggee.
+        // Split the text left of the caret into an optional receiver and a prefix.
+        let left: String = text.chars().take((column - 1).max(0) as usize).collect();
+        let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+        let prefix: String = {
+            let mut p: Vec<char> = left.chars().rev().take_while(|&c| is_ident(c)).collect();
+            p.reverse();
+            p.into_iter().collect()
+        };
+        let before = &left[..left.len() - prefix.len()];
+        let receiver: Option<String> = before.strip_suffix('.').map(|expr| {
+            // Trailing run of an expression before the dot (obj, a.b, arr[0], f()).
+            let mut r: Vec<char> = expr
+                .chars()
+                .rev()
+                .take_while(|&c| is_ident(c) || matches!(c, '.' | '[' | ']' | '(' | ')'))
+                .collect();
+            r.reverse();
+            r.into_iter().collect()
+        });
+
+        // Candidate names from the debuggee.
+        let mut names: Vec<(String, &'static str)> = Vec::new();
+        match &receiver {
+            Some(expr) if !expr.is_empty() => {
+                if let Ok(ev) = self.evaluate(frame_id, expr).await {
+                    if ev.variables_reference > 0 {
+                        if let Ok(children) = self.variables(ev.variables_reference).await {
+                            for c in children {
+                                names.push((c.name, "field"));
+                            }
+                        }
+                    }
                 }
+            }
+            Some(_) => {} // dot with no resolvable receiver
+            None => {
+                // Bare prefix → locals (and `this`, args) from every scope.
+                if let Ok(scopes) = self.scopes(frame_id).await {
+                    for s in scopes {
+                        if let Ok(vars) = self.variables(s.variables_reference).await {
+                            for v in vars {
+                                names.push((v.name, "variable"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Filter by prefix (case-insensitive), dedupe, keep prefix-matches first.
+        let lc = prefix.to_ascii_lowercase();
+        let start = (column - 1) - prefix.chars().count() as i64;
+        let length = prefix.chars().count() as i64;
+        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<CompletionItem> = names
+            .into_iter()
+            .filter(|(n, _)| lc.is_empty() || n.to_ascii_lowercase().starts_with(&lc))
+            // Array/collection children are shown as indices like "0"; drop those.
+            .filter(|(n, _)| n.chars().next().map(|c| c.is_alphabetic() || c == '_' || c == '$').unwrap_or(false))
+            .filter(|(n, _)| seen.insert(n.clone()))
+            .map(|(n, kind)| CompletionItem {
+                label: n.clone(),
+                text: n,
+                kind: Some(kind.to_string()),
+                start: Some(start),
+                length: Some(length),
             })
-            .filter(|c| !c.label.is_empty())
-            .collect())
+            .collect();
+        out.sort_by(|a, b| a.label.to_ascii_lowercase().cmp(&b.label.to_ascii_lowercase()));
+        Ok(out)
     }
 
     /// Assign `value` to the variable `name` under `variables_reference` (a scope
