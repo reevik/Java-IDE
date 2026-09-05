@@ -2586,19 +2586,24 @@ pub async fn debug_start(
 
     // 2. Ask the JDT server (which hosts java-debug) to resolve the classpath and
     //    start a DAP session, then release the LSP lock before the debug session.
-    let (module_paths, class_paths, project, port) = {
+    let (main_class, module_paths, class_paths, project, port) = {
         let mut guard = lsp.0.lock().await;
         let client = ensure_client(&mut guard, &app, &root).await?;
-        let project = client.project_of_main(&main_class).await.unwrap_or_default();
+        // Resolve to the exact main class + project the JDT server knows (retries
+        // while the project is still importing).
+        let (resolved_main, project) = client
+            .resolve_launch_target(&main_class)
+            .await
+            .map_err(|e| e.to_string())?;
         let (mp, cp) = client
-            .resolve_classpath(&main_class, &project)
+            .resolve_classpath(&resolved_main, &project)
             .await
             .map_err(|e| format!("resolving classpath: {e}"))?;
         let port = client
             .start_debug_session()
             .await
             .map_err(|e| format!("starting debug session: {e}"))?;
-        (mp, cp, project, port)
+        (resolved_main, mp, cp, project, port)
     };
 
     // 3. Build the java-debug launch config and connect to the DAP server.

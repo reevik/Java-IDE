@@ -472,13 +472,42 @@ impl LspClient {
         Ok(result.as_array().cloned().unwrap_or_default())
     }
 
-    /// The project name owning `main_class`, if resolveMainClass knows it.
-    pub async fn project_of_main(&self, main_class: &str) -> Option<String> {
-        let list = self.resolve_main_class().await.ok()?;
-        list.iter()
-            .find(|m| m.get("mainClass").and_then(Value::as_str) == Some(main_class))
-            .and_then(|m| m.get("projectName").and_then(Value::as_str))
-            .map(str::to_string)
+    /// Resolve the launch target for `desired` (a main class) into the exact
+    /// `(mainClass, projectName)` the JDT server knows. Retries because project
+    /// import is asynchronous — `resolveMainClass` is empty until it completes.
+    /// `Err` carries a message describing why nothing matched.
+    pub async fn resolve_launch_target(&self, desired: &str) -> Result<(String, String)> {
+        let simple = desired.rsplit('.').next().unwrap_or(desired);
+        let mut last_len = 0usize;
+        for attempt in 0..12u32 {
+            let list = self.resolve_main_class().await.unwrap_or_default();
+            last_len = list.len();
+            if !list.is_empty() {
+                let name_of = |m: &Value| m.get("mainClass").and_then(Value::as_str).map(str::to_string);
+                let proj_of = |m: &Value| m.get("projectName").and_then(Value::as_str).unwrap_or("").to_string();
+                // Prefer an exact FQN match, else a simple-name match.
+                if let Some(m) = list.iter().find(|m| name_of(m).as_deref() == Some(desired)) {
+                    return Ok((desired.to_string(), proj_of(m)));
+                }
+                if let Some(m) = list
+                    .iter()
+                    .find(|m| name_of(m).map(|c| c.rsplit('.').next().unwrap_or(&c) == simple).unwrap_or(false))
+                {
+                    return Ok((name_of(m).unwrap_or_else(|| desired.to_string()), proj_of(m)));
+                }
+                // Non-empty but no match → the class isn't a recognized main class.
+                let known: Vec<String> = list.iter().filter_map(name_of).collect();
+                anyhow::bail!(
+                    "'{desired}' isn't a runnable main class in this project. Known main classes: {}",
+                    if known.is_empty() { "(none)".into() } else { known.join(", ") }
+                );
+            }
+            // Empty list → still importing. Back off and retry.
+            tokio::time::sleep(std::time::Duration::from_millis(if attempt < 3 { 400 } else { 900 })).await;
+        }
+        anyhow::bail!(
+            "the language server hasn't finished importing the project (no main classes resolved yet, last count {last_len}). Wait for indexing to finish and try again."
+        )
     }
 
     /// Resolve `(modulePaths, classPaths)` for launching `main_class` in
