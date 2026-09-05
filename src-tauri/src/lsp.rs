@@ -503,6 +503,7 @@ impl LspClient {
         // resolveMainClass until the list is populated.
         let deadline = std::time::Instant::now() + Duration::from_secs(150);
         let mut attempt = 0u32;
+        let mut ready_since: Option<std::time::Instant> = None;
         loop {
             let list = self.resolve_main_class().await.unwrap_or_default();
             if !list.is_empty() {
@@ -525,8 +526,18 @@ impl LspClient {
                     if known.is_empty() { "(none)".into() } else { known.join(", ") }
                 );
             }
-            if std::time::Instant::now() >= deadline {
+            let now = std::time::Instant::now();
+            if now >= deadline {
                 break;
+            }
+            // If the server has reported ready but still lists no main classes,
+            // waiting longer won't help (it can't resolve this project) — bail
+            // after a short grace so the caller can fall back to another strategy.
+            if self.ready.load(Ordering::SeqCst) {
+                let since = *ready_since.get_or_insert(now);
+                if now.duration_since(since) >= Duration::from_secs(8) {
+                    break;
+                }
             }
             // Empty list → still importing. Back off (fast at first, then steady).
             tokio::time::sleep(Duration::from_millis(if attempt < 4 { 400 } else { 1200 })).await;

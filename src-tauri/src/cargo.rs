@@ -417,3 +417,173 @@ pub async fn build_for_debug(app: AppHandle, dir: &Path, target: DebugTarget) ->
     }
     Ok(())
 }
+
+/// Find the module directory (nearest ancestor holding a `pom.xml`) that owns the
+/// source file for `main_class`, searching under `root`. Returns the module dir.
+fn module_dir_of(root: &Path, main_class: &str) -> Option<std::path::PathBuf> {
+    let simple = main_class.rsplit('.').next().unwrap_or(main_class);
+    let rel = format!("{}.java", main_class.replace('.', "/")); // pkg/Path/Simple.java
+    // Bounded recursive walk, skipping build/vcs noise.
+    fn walk(dir: &Path, simple: &str, rel: &str, depth: usize) -> Option<std::path::PathBuf> {
+        if depth > 12 {
+            return None;
+        }
+        let entries = std::fs::read_dir(dir).ok()?;
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if p.is_dir() {
+                if matches!(name.as_ref(), "target" | "build" | ".git" | "node_modules" | ".metadata") {
+                    continue;
+                }
+                if let Some(hit) = walk(&p, simple, rel, depth + 1) {
+                    return Some(hit);
+                }
+            } else if name == format!("{simple}.java")
+                && p.to_string_lossy().replace('\\', "/").ends_with(rel)
+            {
+                return Some(p);
+            }
+        }
+        None
+    }
+    let file = walk(root, simple, &rel, 0)?;
+    // Walk up from the file to the nearest pom.xml at/below `root`.
+    let mut dir = file.parent()?;
+    loop {
+        if dir.join("pom.xml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        if dir == root {
+            return None;
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// If the root pom declares `<module>{name}</module>` only inside a `<profile>`
+/// (a common libGDX/multi-target layout), return that profile's `<id>` so we can
+/// activate it — otherwise the module isn't in the default reactor and `-pl`
+/// can't find it. Light text scan; good enough for the common shapes.
+fn profile_for_module(root: &Path, name: &str) -> Option<String> {
+    let pom = std::fs::read_to_string(root.join("pom.xml")).ok()?;
+    let module_tag = format!("<module>{name}</module>");
+    // If it's declared as a top-level module (outside any profile), no profile needed.
+    let mut search = pom.as_str();
+    while let Some(pstart) = search.find("<profile>") {
+        let after = &search[pstart..];
+        let pend = after.find("</profile>").map(|e| pstart + e).unwrap_or(pom.len());
+        let block = &pom[pstart..pend];
+        if block.contains(&module_tag) {
+            // Extract this profile's <id>…</id>.
+            if let Some(is) = block.find("<id>") {
+                if let Some(ie) = block[is + 4..].find("</id>") {
+                    return Some(block[is + 4..is + 4 + ie].trim().to_string());
+                }
+            }
+        }
+        search = &search[pend.min(search.len())..];
+    }
+    None
+}
+
+/// Compute the launch classpath for `main_class` ourselves via Maven, scoped to the
+/// owning module (`-pl <module> -am`) so a broken sibling module in a multi-module
+/// reactor can't stop us. Returns absolute classpath entries (the module's own
+/// `target/classes` plus every runtime dependency). Used when the JDT language
+/// server can't resolve the project (e.g. its embedded Maven import fails).
+pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -> Result<Vec<String>> {
+    let (program, gradle) = detect_tool(root)
+        .ok_or_else(|| anyhow::anyhow!("No pom.xml found at the project root — can't compute a classpath."))?;
+    if gradle {
+        bail!("Automatic classpath fallback is only implemented for Maven projects so far.");
+    }
+    let module = module_dir_of(root, main_class)
+        .ok_or_else(|| anyhow::anyhow!("Couldn't find the source file for '{main_class}' under the project."))?;
+    let rel = module
+        .strip_prefix(root)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| ".".into());
+
+    let out_file = std::env::temp_dir().join(format!("java-ade-cp-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&out_file);
+    let emit = |app: &AppHandle, text: String| {
+        let _ = app.emit("cargo:event", CargoEvent::Line { stream: "stdout".into(), text });
+    };
+    emit(&app, format!("Resolving classpath for module '{rel}' (mvn -pl {rel} -am)…"));
+
+    // Compile the owning module + its upstream deps only, and write the runtime
+    // dependency classpath to a file.
+    let mut args = vec!["-B".to_string(), "-q".to_string()];
+    // If the module is only declared inside a profile, activate it.
+    if let Some(profile) = profile_for_module(root, &rel) {
+        emit(&app, format!("Activating Maven profile '{profile}' for module '{rel}'."));
+        args.push(format!("-P{profile}"));
+    }
+    if rel != "." {
+        args.push("-pl".into());
+        args.push(rel.clone());
+        args.push("-am".into());
+    }
+    args.push("compile".into());
+    args.push("dependency:build-classpath".into());
+    args.push("-Dmdep.includeScope=runtime".into());
+    args.push(format!("-Dmdep.outputFile={}", out_file.display()));
+    args.push("-Dmdep.pathSeparator=:".into());
+
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.args(&args)
+        .current_dir(root)
+        .env("PATH", crate::toolchain::effective_path());
+    if let Some(home) = crate::toolchain::java_home() {
+        cmd.env("JAVA_HOME", home);
+    }
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("spawning {program} — is it on PATH?"))?;
+    let pump = |app: AppHandle, out: Option<tokio::process::ChildStdout>, err: Option<tokio::process::ChildStderr>| async move {
+        let mut o = out.map(|r| BufReader::new(r).lines());
+        let mut e = err.map(|r| BufReader::new(r).lines());
+        loop {
+            tokio::select! {
+                l = async { o.as_mut().unwrap().next_line().await }, if o.is_some() => {
+                    match l { Ok(Some(l)) => { let _ = app.emit("cargo:event", CargoEvent::Line { stream: "stdout".into(), text: strip_ansi(&l) }); }, _ => o = None }
+                }
+                l = async { e.as_mut().unwrap().next_line().await }, if e.is_some() => {
+                    match l { Ok(Some(l)) => { let _ = app.emit("cargo:event", CargoEvent::Line { stream: "stderr".into(), text: strip_ansi(&l) }); }, _ => e = None }
+                }
+                else => break,
+            }
+        }
+    };
+    pump(app.clone(), child.stdout.take(), child.stderr.take()).await;
+    let status = child.wait().await.context("waiting for the classpath build")?;
+    if !status.success() {
+        bail!("Maven failed while resolving the classpath for '{main_class}' — see the output above.");
+    }
+
+    let deps = std::fs::read_to_string(&out_file)
+        .with_context(|| format!("reading the resolved classpath at {}", out_file.display()))?;
+    let _ = std::fs::remove_file(&out_file);
+
+    let mut cp: Vec<String> = Vec::new();
+    // The module's own compiled output first, then its dependencies.
+    let own = module.join("target").join("classes");
+    if own.exists() {
+        cp.push(own.to_string_lossy().into_owned());
+    }
+    for entry in deps.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+        cp.push(entry.to_string());
+    }
+    if cp.is_empty() {
+        bail!("Resolved an empty classpath for '{main_class}'.");
+    }
+    emit(&app, format!("Classpath resolved: {} entries.", cp.len()));
+    Ok(cp)
+}

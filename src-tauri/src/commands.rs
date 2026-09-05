@@ -2587,25 +2587,45 @@ pub async fn debug_start(
     // modules), which is slow and often fails, hanging the "Building…" step.
 
     // 1. Ask the JDT server (which hosts java-debug) to resolve the classpath and
-    //    start a DAP session, then release the LSP lock before the debug session.
-    let (main_class, module_paths, class_paths, project, port) = {
+    //    start a DAP session. Do the JDT work under the lock; release it before the
+    //    (potentially slow) Maven fallback and the debug session itself.
+    let (jdt, port) = {
         let mut guard = lsp.0.lock().await;
         let client = ensure_client(&mut guard, &app, &root).await?;
-        // Resolve to the exact main class + project the JDT server knows (retries
-        // while the project is still importing).
-        let (resolved_main, project) = client
-            .resolve_launch_target(&main_class)
-            .await
-            .map_err(|e| e.to_string())?;
-        let (mp, cp) = client
-            .resolve_classpath(&resolved_main, &project)
-            .await
-            .map_err(|e| format!("resolving classpath: {e}"))?;
+        let jdt = async {
+            let (rm, proj) = client.resolve_launch_target(&main_class).await?;
+            let (mp, cp) = client.resolve_classpath(&rm, &proj).await?;
+            anyhow::Ok((rm, mp, cp, proj))
+        }
+        .await;
+        // The DAP server itself always comes from the JDT plugin.
         let port = client
             .start_debug_session()
             .await
             .map_err(|e| format!("starting debug session: {e}"))?;
-        (resolved_main, mp, cp, project, port)
+        (jdt, port)
+    };
+    let (main_class, module_paths, class_paths, project) = match jdt {
+        Ok((rm, mp, cp, proj)) if !cp.is_empty() => (rm, mp, cp, proj),
+        // The JDT server couldn't resolve the project (e.g. its embedded Maven
+        // import failed on a sibling module of a multi-module reactor, or the
+        // modules are gated behind profiles). Compute the classpath ourselves via
+        // Maven, scoped to the owning module.
+        other => {
+            if let Err(e) = &other {
+                let _ = app.emit(
+                    "cargo:event",
+                    cargo::CargoEvent::Line {
+                        stream: "stdout".into(),
+                        text: format!("Language server couldn't resolve the classpath ({e}); resolving with Maven…"),
+                    },
+                );
+            }
+            let cp = cargo::classpath_for_main(app.clone(), &r, &main_class)
+                .await
+                .map_err(|e| format!("resolving classpath with Maven: {e}"))?;
+            (main_class.clone(), Vec::new(), cp, String::new())
+        }
     };
 
     // 2. Build the java-debug launch config and connect to the DAP server.
