@@ -180,6 +180,7 @@ export default function App() {
   const [editingConfigs, setEditingConfigs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [gotoLine, setGotoLine] = useState(false);
+  const [runMenu, setRunMenu] = useState<{ run: Runnable; path: string; x: number; y: number } | null>(null);
   const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies">("project");
 
   // Apply persisted AI model + toolchain overrides to the backend on startup.
@@ -1162,23 +1163,16 @@ export default function App() {
     if (projectRef.current) saveBreakpoints(projectRef.current, next);
   }, []);
 
-  const startOrContinue = useCallback(async () => {
+  // Build + launch a fresh debug session for an explicit target.
+  const launchDebug = useCallback(async (target: { kind: "bin" | "test"; name: string | null }) => {
     if (!project) return;
     if (!hasDebuggerRef.current) {
       setOutputHidden(false);
       setOutputTab("debugger");
       setDebugConsole([
         "Debugger unavailable: the java-debug plugin isn't installed.",
-        "Install Microsoft's java-debug (e.g. VS Code's 'Debugger for Java' extension) and set",
-        "JAVA_DEBUG_BUNDLE to its com.microsoft.java.debug.plugin-*.jar, then reopen the project.",
+        "Open the Debugger tab and click “Install java-debug”, then reopen the project.",
       ]);
-      return;
-    }
-    // F5 while paused → continue.
-    if (debugStatusRef.current === "paused" && threadIdRef.current != null) {
-      setDebugStatus("running");
-      setStopPos(null);
-      await debugContinue(threadIdRef.current).catch((e) => setDebugConsole((p) => [...p, String(e)]));
       return;
     }
     if (debugStatusRef.current === "building" || debugStatusRef.current === "running") return;
@@ -1191,13 +1185,32 @@ export default function App() {
     setOutputHidden(false);
     setOutputTab("debugger");
     try {
-      await debugStart(project.path, debugTarget.kind, debugTarget.name, [], toSourceMap(breakpointsRef.current));
+      await debugStart(project.path, target.kind, target.name, [], toSourceMap(breakpointsRef.current));
       setDebugStatus("running");
     } catch (e) {
       setDebugConsole((p) => [...p, String(e)]);
       setDebugStatus("idle");
     }
-  }, [project, debugTarget, saveNow]);
+  }, [project, saveNow]);
+
+  const startOrContinue = useCallback(async () => {
+    if (!project) return;
+    // F5 while paused → continue.
+    if (debugStatusRef.current === "paused" && threadIdRef.current != null) {
+      setDebugStatus("running");
+      setStopPos(null);
+      await debugContinue(threadIdRef.current).catch((e) => setDebugConsole((p) => [...p, String(e)]));
+      return;
+    }
+    await launchDebug(debugTarget);
+  }, [project, debugTarget, launchDebug]);
+
+  // Debug a specific gutter runnable (a main class; tests aren't debuggable yet).
+  const debugSymbol = useCallback((run: Runnable) => {
+    const target = { kind: (run.kind === "test" ? "test" : "bin") as "bin" | "test", name: run.name };
+    setDebugTarget(target);
+    void launchDebug(target);
+  }, [launchDebug]);
 
   const stepOver = useCallback(() => {
     if (threadIdRef.current != null) void debugNext(threadIdRef.current).catch(() => {});
@@ -1392,7 +1405,7 @@ export default function App() {
         breakpoints={breakpoints[f.path] ?? EMPTY_BREAKPOINTS}
         onToggleBreakpoint={toggleBreakpoint}
         stopLine={stopPos && stopPos.path === f.path ? stopPos.line : null}
-        onRunSymbol={(run) => runSymbol(run, f.path)}
+        onRunSymbol={(run, x, y, menu) => (menu ? setRunMenu({ run, path: f.path, x, y }) : runSymbol(run, f.path))}
         onFindUsages={showUsages}
         onRename={applyRename}
         agentActive={agentActive}
@@ -1516,6 +1529,7 @@ export default function App() {
             onRun={runSelectedConfig}
             onEdit={() => setEditingConfigs(true)}
           />
+          <CargoButton onClick={() => void startOrContinue()} disabled={running || debugStatus === "running" || debugStatus === "building"} label="Debug" hint="F5" icon={<BugIcon />} />
           <CargoButton onClick={() => void runCargo("clippy")} disabled={running} label="Check" hint="⌘L" icon={<SparkleIcon />} />
           {running && (
             <button onClick={() => void cargoCancel()} className="btn-bezel ml-1 px-2.5 py-1 text-[12px]">
@@ -1767,6 +1781,26 @@ export default function App() {
       )}
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+
+      {runMenu && (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setRunMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRunMenu(null); }} />
+          <div className="context-menu fixed z-[71] py-1" style={{ left: runMenu.x, top: runMenu.y }}>
+            <button
+              className="context-item flex items-center gap-2"
+              onClick={() => { runSymbol(runMenu.run, runMenu.path); setRunMenu(null); }}
+            >
+              <span className="text-green-600">▶</span> Run ‘{runMenu.run.name}’
+            </button>
+            <button
+              className="context-item flex items-center gap-2"
+              onClick={() => { debugSymbol(runMenu.run); setRunMenu(null); }}
+            >
+              <span className="text-[var(--accent)]">🐞</span> Debug ‘{runMenu.run.name}’
+            </button>
+          </div>
+        </>
+      )}
 
       {gotoLine && active && (
         <GoToLineDialog
@@ -2020,6 +2054,15 @@ function HammerIcon() {
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-secondary)]">
       <path d="M14 6l4 4M3 21l7.5-7.5M12.5 8.5l3-3 1-1a2.8 2.8 0 0 1 4 4l-1 1-3 3-4-4z" />
       <path d="M9 11l4 4-1.5 1.5a2 2 0 0 1-3 0l-1-1a2 2 0 0 1 0-3z" />
+    </svg>
+  );
+}
+
+function BugIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-secondary)]">
+      <rect x="8" y="6" width="8" height="12" rx="4" />
+      <path d="M12 6V4M9 6l-1.5-2M15 6l1.5-2M8 11H4M20 11h-4M8 15l-4 2M20 17l-4-2M12 10v6" />
     </svg>
   );
 }

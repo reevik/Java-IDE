@@ -405,20 +405,35 @@ const runnablesField = StateField.define<RangeSet<GutterMarker>>({
 });
 
 /** Gutter (left-most) with a green ▶ on each runnable fn; click runs it. */
-function runGutter(onRun: (run: Runnable) => void) {
+/** onRun: left-click runs (menu=false); right-click opens a Run/Debug menu (menu=true). */
+function runGutter(onRun: (run: Runnable, x: number, y: number, menu: boolean) => void) {
+  const at = (view: EditorView, from: number): Runnable | null => {
+    let hit: Runnable | null = null;
+    view.state.field(runnablesField).between(from, from, (_f, _t, m) => {
+      hit = (m as RunMarker).run;
+      return false;
+    });
+    return hit;
+  };
   return gutter({
     class: "cm-run-gutter",
     markers: (v) => v.state.field(runnablesField),
     domEventHandlers: {
       mousedown(view, line, event) {
-        let hit: Runnable | null = null;
-        view.state.field(runnablesField).between(line.from, line.from, (_f, _t, m) => {
-          hit = (m as RunMarker).run;
-          return false;
-        });
+        const e = event as MouseEvent;
+        if (e.button !== 0 || e.ctrlKey) return false; // right/ctrl → contextmenu
+        const hit = at(view, line.from);
         if (!hit) return false;
-        onRun(hit);
-        (event as Event).preventDefault();
+        e.preventDefault();
+        onRun(hit, e.clientX, e.clientY, false);
+        return true;
+      },
+      contextmenu(view, line, event) {
+        const e = event as MouseEvent;
+        const hit = at(view, line.from);
+        if (!hit) return false;
+        e.preventDefault();
+        onRun(hit, e.clientX, e.clientY, true);
         return true;
       },
     },
@@ -882,7 +897,7 @@ interface Props {
   /** "Explain" a diagnostic (message + surrounding source) via the AI chat. */
   onExplainDiagnostic?: (message: string, snippet: string) => void;
   /** Run a function via its ▶ gutter marker (creates a run config + executes). */
-  onRunSymbol?: (run: Runnable) => void;
+  onRunSymbol?: (run: Runnable, x: number, y: number, menu: boolean) => void;
   /** Show "Find Usages" results for `symbol` in the Usages panel. */
   onFindUsages?: (symbol: string, refs: Reference[]) => void;
   /** Apply a project-wide rename's per-file edits (across open buffers + disk). */
@@ -1577,7 +1592,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     const state = EditorState.create({
       doc: initial,
       extensions: [
-        ...(isJava ? [runnablesField, runGutter((r) => onRunSymbolRef.current?.(r))] : []),
+        ...(isJava ? [runnablesField, runGutter((r, x, y, menu) => onRunSymbolRef.current?.(r, x, y, menu))] : []),
         breakpointField,
         breakpointGutter((ln) => onToggleBreakpointRef.current?.(ln)),
         stopLineField,
