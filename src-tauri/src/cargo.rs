@@ -488,11 +488,64 @@ fn profile_for_module(root: &Path, name: &str) -> Option<String> {
     None
 }
 
+/// Newest modification time of any file with `ext` under `dir` (recursive,
+/// skipping build/vcs noise). `None` if the tree has no such file.
+fn newest_mtime(dir: &Path, ext: &str) -> Option<std::time::SystemTime> {
+    fn walk(dir: &Path, ext: &str, best: &mut Option<std::time::SystemTime>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if p.is_dir() {
+                if matches!(name.as_ref(), "target" | "build" | ".git" | "node_modules" | ".metadata") {
+                    continue;
+                }
+                walk(&p, ext, best);
+            } else if name.ends_with(ext) {
+                if let Ok(m) = e.metadata().and_then(|m| m.modified()) {
+                    if best.map(|b| m > b).unwrap_or(true) {
+                        *best = Some(m);
+                    }
+                }
+            }
+        }
+    }
+    let mut best = None;
+    walk(dir, ext, &mut best);
+    best
+}
+
+/// A signature of the pom files that determine the dependency set, so a cached
+/// classpath can be reused until a pom changes.
+fn pom_signature(root: &Path, module: &Path) -> String {
+    let mt = |p: std::path::PathBuf| {
+        std::fs::metadata(&p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    };
+    format!("{}:{}", mt(root.join("pom.xml")), mt(module.join("pom.xml")))
+}
+
+fn cp_cache_file(module: &Path) -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    module.hash(&mut h);
+    std::env::temp_dir().join(format!("java-ade-cp-{:016x}.cache", h.finish()))
+}
+
 /// Compute the launch classpath for `main_class` ourselves via Maven, scoped to the
 /// owning module (`-pl <module> -am`) so a broken sibling module in a multi-module
 /// reactor can't stop us. Returns absolute classpath entries (the module's own
 /// `target/classes` plus every runtime dependency). Used when the JDT language
 /// server can't resolve the project (e.g. its embedded Maven import fails).
+///
+/// Repeat launches are fast: the resolved dependency list is cached (keyed by the
+/// pom mtimes) so `dependency:build-classpath` is skipped until a pom changes, and
+/// compilation is skipped entirely when no source is newer than the compiled output.
 pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -> Result<Vec<String>> {
     let (program, gradle) = detect_tool(root)
         .ok_or_else(|| anyhow::anyhow!("No pom.xml found at the project root — can't compute a classpath."))?;
@@ -508,19 +561,53 @@ pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| ".".into());
 
-    let out_file = std::env::temp_dir().join(format!("java-ade-cp-{}.txt", std::process::id()));
-    let _ = std::fs::remove_file(&out_file);
     let emit = |app: &AppHandle, text: String| {
         let _ = app.emit("cargo:event", CargoEvent::Line { stream: "stdout".into(), text });
     };
-    emit(&app, format!("Resolving classpath for module '{rel}' (mvn -pl {rel} -am)…"));
+    let own = module.join("target").join("classes");
+    let build_cp = |deps: &str| -> Vec<String> {
+        let mut cp: Vec<String> = Vec::new();
+        if own.exists() {
+            cp.push(own.to_string_lossy().into_owned());
+        }
+        cp.extend(deps.split(':').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string));
+        cp
+    };
 
-    // Compile the owning module + its upstream deps only, and write the runtime
-    // dependency classpath to a file.
+    // Reuse the cached dependency list unless a pom changed.
+    let sig = pom_signature(root, &module);
+    let cache = cp_cache_file(&module);
+    let cached_deps: Option<String> = std::fs::read_to_string(&cache).ok().and_then(|c| {
+        let (first, rest) = c.split_once('\n')?;
+        (first == sig).then(|| rest.to_string())
+    });
+
+    // Only recompile when a source is newer than the compiled output.
+    let need_compile = !own.exists()
+        || match (newest_mtime(root, ".java"), newest_mtime(&own, ".class")) {
+            (Some(src), Some(cls)) => src > cls,
+            _ => true,
+        };
+
+    // Nothing to do: classes are current and the classpath is cached.
+    if !need_compile {
+        if let Some(deps) = &cached_deps {
+            let cp = build_cp(deps);
+            if !cp.is_empty() {
+                return Ok(cp);
+            }
+        }
+    }
+
+    // Build the Maven goal list: compile only when stale, resolve the classpath
+    // only when the cache is cold.
+    let need_classpath = cached_deps.is_none();
+    let out_file = std::env::temp_dir().join(format!("java-ade-cp-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&out_file);
+    emit(&app, format!("Preparing debug classpath for module '{rel}'…"));
+
     let mut args = vec!["-B".to_string(), "-q".to_string()];
-    // If the module is only declared inside a profile, activate it.
     if let Some(profile) = profile_for_module(root, &rel) {
-        emit(&app, format!("Activating Maven profile '{profile}' for module '{rel}'."));
         args.push(format!("-P{profile}"));
     }
     if rel != "." {
@@ -528,11 +615,15 @@ pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -
         args.push(rel.clone());
         args.push("-am".into());
     }
-    args.push("compile".into());
-    args.push("dependency:build-classpath".into());
-    args.push("-Dmdep.includeScope=runtime".into());
-    args.push(format!("-Dmdep.outputFile={}", out_file.display()));
-    args.push("-Dmdep.pathSeparator=:".into());
+    if need_compile {
+        args.push("compile".into());
+    }
+    if need_classpath {
+        args.push("dependency:build-classpath".into());
+        args.push("-Dmdep.includeScope=runtime".into());
+        args.push(format!("-Dmdep.outputFile={}", out_file.display()));
+        args.push("-Dmdep.pathSeparator=:".into());
+    }
 
     let mut cmd = tokio::process::Command::new(&program);
     cmd.args(&args)
@@ -568,22 +659,21 @@ pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -
         bail!("Maven failed while resolving the classpath for '{main_class}' — see the output above.");
     }
 
-    let deps = std::fs::read_to_string(&out_file)
-        .with_context(|| format!("reading the resolved classpath at {}", out_file.display()))?;
-    let _ = std::fs::remove_file(&out_file);
+    // Freshly resolved deps (and refresh the cache), or the still-valid cached set.
+    let deps = if need_classpath {
+        let d = std::fs::read_to_string(&out_file)
+            .with_context(|| format!("reading the resolved classpath at {}", out_file.display()))?;
+        let _ = std::fs::remove_file(&out_file);
+        let _ = std::fs::write(&cache, format!("{sig}\n{d}"));
+        d
+    } else {
+        cached_deps.unwrap_or_default()
+    };
 
-    let mut cp: Vec<String> = Vec::new();
-    // The module's own compiled output first, then its dependencies.
-    let own = module.join("target").join("classes");
-    if own.exists() {
-        cp.push(own.to_string_lossy().into_owned());
-    }
-    for entry in deps.split(':').map(str::trim).filter(|s| !s.is_empty()) {
-        cp.push(entry.to_string());
-    }
+    let cp = build_cp(&deps);
     if cp.is_empty() {
         bail!("Resolved an empty classpath for '{main_class}'.");
     }
-    emit(&app, format!("Classpath resolved: {} entries.", cp.len()));
+    emit(&app, format!("Debug classpath ready: {} entries.", cp.len()));
     Ok(cp)
 }
