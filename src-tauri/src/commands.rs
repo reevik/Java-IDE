@@ -2579,12 +2579,14 @@ pub async fn debug_start(
     }
     let main_class = name.filter(|s| !s.is_empty()).ok_or("Set a main class on the run configuration to debug it.")?;
 
-    // 1. Compile so java-debug resolves up-to-date classes.
-    cargo::build_for_debug(app.clone(), &r, cargo::DebugTarget::Bin(main_class.clone()))
-        .await
-        .map_err(|e| e.to_string())?;
+    // Note: we deliberately do NOT run `mvn/gradle compile` here. JDT.LS builds
+    // the project incrementally (into target/classes) on import and on save, so
+    // the classes java-debug launches are already up to date — this is how the
+    // VS Code Java debugger works too. Running the build ourselves would compile
+    // the whole reactor in a multi-module project (e.g. libGDX android/ios/html
+    // modules), which is slow and often fails, hanging the "Building…" step.
 
-    // 2. Ask the JDT server (which hosts java-debug) to resolve the classpath and
+    // 1. Ask the JDT server (which hosts java-debug) to resolve the classpath and
     //    start a DAP session, then release the LSP lock before the debug session.
     let (main_class, module_paths, class_paths, project, port) = {
         let mut guard = lsp.0.lock().await;
@@ -2606,7 +2608,7 @@ pub async fn debug_start(
         (resolved_main, mp, cp, project, port)
     };
 
-    // 3. Build the java-debug launch config and connect to the DAP server.
+    // 2. Build the java-debug launch config and connect to the DAP server.
     let launch = serde_json::json!({
         "type": "java",
         "request": "launch",

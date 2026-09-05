@@ -358,6 +358,7 @@ pub enum DebugTarget {
 /// classes. Streams compiler output to the `cargo:event` channel like a normal
 /// build; returns `Ok(())` on success. (java-debug resolves the classpath from the
 /// JDT server, so no artifact path is produced here.)
+#[allow(dead_code)] // reserved for scoped/test-debug builds; debug_start relies on JDT.LS's incremental build
 pub async fn build_for_debug(app: AppHandle, dir: &Path, target: DebugTarget) -> Result<()> {
     let Some((program, gradle)) = detect_tool(dir) else {
         bail!("No pom.xml or build.gradle found — open a Maven or Gradle project.");
