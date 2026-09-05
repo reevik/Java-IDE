@@ -1741,6 +1741,12 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         ref={host}
         className="cm-host h-full"
         onContextMenu={(e) => {
+          // Right-clicks on the run gutter open the Run/Debug menu instead;
+          // don't also open the editor's Cut/Copy/Paste menu.
+          if ((e.target as HTMLElement | null)?.closest?.(".cm-run-gutter")) {
+            e.preventDefault();
+            return;
+          }
           e.preventDefault();
           // Re-apply the selection captured at right-mousedown (CM may have
           // collapsed it), so the menu acts on what was selected.
