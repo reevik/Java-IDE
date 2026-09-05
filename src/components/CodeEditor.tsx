@@ -433,6 +433,9 @@ function runGutter(onRun: (run: Runnable, x: number, y: number, menu: boolean) =
         const hit = at(view, line.from);
         if (!hit) return false;
         e.preventDefault();
+        // Stop the event reaching the editor wrapper's onContextMenu, or the
+        // Cut/Copy/Paste menu would open on top of the Run/Debug menu.
+        e.stopPropagation();
         onRun(hit, e.clientX, e.clientY, true);
         return true;
       },
