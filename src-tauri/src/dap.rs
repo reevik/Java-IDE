@@ -500,12 +500,51 @@ impl DapClient {
         let mut names: Vec<(String, &'static str)> = Vec::new();
         match &receiver {
             Some(expr) if !expr.is_empty() => {
-                if let Ok(ev) = self.evaluate(frame_id, expr).await {
-                    if ev.variables_reference > 0 {
-                        if let Ok(children) = self.variables(ev.variables_reference).await {
-                            for c in children {
-                                names.push((c.name, "field"));
+                // Resolve `a.b.c` through the live variables tree — this works even
+                // when the project can't be compiled (so `evaluate` is unavailable),
+                // as long as the receiver is a local and its field chain. Fall back
+                // to `evaluate` for anything the tree can't reach (e.g. method calls).
+                let segs: Vec<&str> = expr.split('.').filter(|s| !s.is_empty()).collect();
+                let simple = !segs.is_empty() && segs.iter().all(|s| s.chars().all(is_ident));
+                let mut fields_ref: Option<i64> = None;
+                if simple {
+                    let mut pool: Vec<Variable> = Vec::new();
+                    if let Ok(scopes) = self.scopes(frame_id).await {
+                        for s in scopes {
+                            if let Ok(v) = self.variables(s.variables_reference).await {
+                                pool.extend(v);
                             }
+                        }
+                    }
+                    let mut cur = pool.iter().find(|v| v.name == segs[0]).map(|v| v.variables_reference);
+                    for seg in &segs[1..] {
+                        cur = match cur {
+                            Some(r) if r > 0 => self
+                                .variables(r)
+                                .await
+                                .ok()
+                                .and_then(|ch| ch.iter().find(|v| &v.name == seg).map(|v| v.variables_reference)),
+                            _ => None,
+                        };
+                        if cur.is_none() {
+                            break;
+                        }
+                    }
+                    fields_ref = cur.filter(|&r| r > 0);
+                }
+                let child_ref = match fields_ref {
+                    Some(r) => Some(r),
+                    None => self
+                        .evaluate(frame_id, expr)
+                        .await
+                        .ok()
+                        .map(|ev| ev.variables_reference)
+                        .filter(|&r| r > 0),
+                };
+                if let Some(r) = child_ref {
+                    if let Ok(children) = self.variables(r).await {
+                        for c in children {
+                            names.push((c.name, "field"));
                         }
                     }
                 }

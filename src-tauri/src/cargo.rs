@@ -466,6 +466,21 @@ fn module_dir_of(root: &Path, main_class: &str) -> Option<std::path::PathBuf> {
 /// (a common libGDX/multi-target layout), return that profile's `<id>` so we can
 /// activate it — otherwise the module isn't in the default reactor and `-pl`
 /// can't find it. Light text scan; good enough for the common shapes.
+/// The module's own `<artifactId>` (ignoring the one inside `<parent>`), which is
+/// the name JDT.LS gives the imported project — java-debug needs it to evaluate
+/// expressions.
+fn module_artifact_id(module: &Path) -> Option<String> {
+    let pom = std::fs::read_to_string(module.join("pom.xml")).ok()?;
+    // Drop the <parent>…</parent> block so we read the module's own artifactId.
+    let body = match (pom.find("<parent>"), pom.find("</parent>")) {
+        (Some(s), Some(e)) if e > s => format!("{}{}", &pom[..s], &pom[e + "</parent>".len()..]),
+        _ => pom.clone(),
+    };
+    let is = body.find("<artifactId>")?;
+    let ie = body[is + 12..].find("</artifactId>")?;
+    Some(body[is + 12..is + 12 + ie].trim().to_string())
+}
+
 fn profile_for_module(root: &Path, name: &str) -> Option<String> {
     let pom = std::fs::read_to_string(root.join("pom.xml")).ok()?;
     let module_tag = format!("<module>{name}</module>");
@@ -546,7 +561,7 @@ fn cp_cache_file(module: &Path) -> std::path::PathBuf {
 /// Repeat launches are fast: the resolved dependency list is cached (keyed by the
 /// pom mtimes) so `dependency:build-classpath` is skipped until a pom changes, and
 /// compilation is skipped entirely when no source is newer than the compiled output.
-pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -> Result<Vec<String>> {
+pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -> Result<(String, Vec<String>)> {
     let (program, gradle) = detect_tool(root)
         .ok_or_else(|| anyhow::anyhow!("No pom.xml found at the project root — can't compute a classpath."))?;
     if gradle {
@@ -589,12 +604,14 @@ pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -
             _ => true,
         };
 
+    let project = module_artifact_id(&module).unwrap_or_default();
+
     // Nothing to do: classes are current and the classpath is cached.
     if !need_compile {
         if let Some(deps) = &cached_deps {
             let cp = build_cp(deps);
             if !cp.is_empty() {
-                return Ok(cp);
+                return Ok((project, cp));
             }
         }
     }
@@ -675,5 +692,5 @@ pub async fn classpath_for_main(app: AppHandle, root: &Path, main_class: &str) -
         bail!("Resolved an empty classpath for '{main_class}'.");
     }
     emit(&app, format!("Debug classpath ready: {} entries.", cp.len()));
-    Ok(cp)
+    Ok((project, cp))
 }

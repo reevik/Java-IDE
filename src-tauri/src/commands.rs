@@ -2621,10 +2621,10 @@ pub async fn debug_start(
                     },
                 );
             }
-            let cp = cargo::classpath_for_main(app.clone(), &r, &main_class)
+            let (project, cp) = cargo::classpath_for_main(app.clone(), &r, &main_class)
                 .await
                 .map_err(|e| format!("resolving classpath with Maven: {e}"))?;
-            (main_class.clone(), Vec::new(), cp, String::new())
+            (main_class.clone(), Vec::new(), cp, project)
         }
     };
 
