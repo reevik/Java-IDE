@@ -538,6 +538,13 @@ export interface EvalResult {
   result: string;
   variables_reference: number;
 }
+export interface CompletionTarget {
+  label: string;
+  text: string;
+  type: string | null;
+  start: number | null;
+  length: number | null;
+}
 
 /** Path to the java-debug plugin jar, or null when the debugger isn't installed. */
 export function debuggerAdapter(): Promise<string | null> {
@@ -588,6 +595,14 @@ export function debugVariables(variablesReference: number): Promise<Variable[]> 
 }
 export function debugEval(frameId: number, expr: string): Promise<EvalResult> {
   return invoke("debug_eval", { frameId, expr });
+}
+/** REPL completions for `text` with the caret at 1-based `column`. */
+export function debugCompletions(frameId: number, text: string, column: number): Promise<CompletionTarget[]> {
+  return invoke("debug_completions", { frameId, text, column });
+}
+/** Assign a new value to a variable; resolves to its new value string. */
+export function debugSetVariable(variablesReference: number, name: string, value: string): Promise<EvalResult> {
+  return invoke("debug_set_variable", { variablesReference, name, value });
 }
 export function debugStop(): Promise<void> {
   return invoke("debug_stop");

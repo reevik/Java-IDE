@@ -418,6 +418,8 @@ pub fn run() {
             commands::debug_scopes,
             commands::debug_variables,
             commands::debug_eval,
+            commands::debug_completions,
+            commands::debug_set_variable,
             commands::debug_stop,
         ])
         .run(tauri::generate_context!())

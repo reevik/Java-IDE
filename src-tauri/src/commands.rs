@@ -2740,6 +2740,38 @@ pub async fn debug_eval(
     g.as_ref().ok_or("no debug session")?.evaluate(frame_id, &expr).await.map_err(|e| e.to_string())
 }
 
+/// REPL completions for the Debug Console's evaluate box.
+#[tauri::command]
+pub async fn debug_completions(
+    frame_id: i64,
+    text: String,
+    column: i64,
+    dap: State<'_, DapState>,
+) -> Result<Vec<crate::dap::CompletionItem>, String> {
+    let g = dap.0.lock().await;
+    // No session / adapter without completion support → just no suggestions.
+    match g.as_ref() {
+        Some(c) => Ok(c.completions(frame_id, &text, column).await.unwrap_or_default()),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Assign a new value to a variable shown in the debug window.
+#[tauri::command]
+pub async fn debug_set_variable(
+    variables_reference: i64,
+    name: String,
+    value: String,
+    dap: State<'_, DapState>,
+) -> Result<crate::dap::EvalResult, String> {
+    let g = dap.0.lock().await;
+    g.as_ref()
+        .ok_or("no debug session")?
+        .set_variable(variables_reference, &name, &value)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// End the session and terminate the debuggee.
 #[tauri::command]
 pub async fn debug_stop(dap: State<'_, DapState>) -> Result<(), String> {

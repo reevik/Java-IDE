@@ -85,6 +85,22 @@ pub struct EvalResult {
     pub variables_reference: i64,
 }
 
+/// One REPL completion proposal from the adapter's `completions` request.
+#[derive(serde::Serialize)]
+pub struct CompletionItem {
+    /// Text shown in the list.
+    pub label: String,
+    /// Text to insert (defaults to `label` when the adapter omits it).
+    pub text: String,
+    /// DAP item type ("method", "field", "variable", …) for an icon, if given.
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+    /// When set, the span in the input the insertion replaces (0-based, in UTF-16
+    /// code units as DAP specifies). Falls back to whole-word replacement client-side.
+    pub start: Option<i64>,
+    pub length: Option<i64>,
+}
+
 pub struct DapClient {
     writer: Arc<tokio::sync::Mutex<OwnedWriteHalf>>,
     pending: Arc<StdMutex<HashMap<i64, oneshot::Sender<Value>>>>,
@@ -417,6 +433,50 @@ impl DapClient {
             .await?;
         Ok(EvalResult {
             result: body.get("result").and_then(Value::as_str).unwrap_or("").to_string(),
+            variables_reference: body.get("variablesReference").and_then(Value::as_i64).unwrap_or(0),
+        })
+    }
+
+    /// REPL completions for `text` with the caret at `column` (1-based, per DAP),
+    /// in the context of `frame_id`. Empty when the adapter has none.
+    pub async fn completions(&self, frame_id: i64, text: &str, column: i64) -> Result<Vec<CompletionItem>> {
+        let body = self
+            .request(
+                "completions",
+                json!({ "frameId": frame_id, "text": text, "column": column }),
+                Duration::from_secs(6),
+            )
+            .await?;
+        let targets = body.get("targets").and_then(Value::as_array).cloned().unwrap_or_default();
+        Ok(targets
+            .iter()
+            .map(|t| {
+                let label = t.get("label").and_then(Value::as_str).unwrap_or("").to_string();
+                let text = t.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| label.clone());
+                CompletionItem {
+                    label,
+                    text,
+                    kind: t.get("type").and_then(Value::as_str).map(str::to_string),
+                    start: t.get("start").and_then(Value::as_i64),
+                    length: t.get("length").and_then(Value::as_i64),
+                }
+            })
+            .filter(|c| !c.label.is_empty())
+            .collect())
+    }
+
+    /// Assign `value` to the variable `name` under `variables_reference` (a scope
+    /// or a structured value). Returns the variable's new value string.
+    pub async fn set_variable(&self, variables_reference: i64, name: &str, value: &str) -> Result<EvalResult> {
+        let body = self
+            .request(
+                "setVariable",
+                json!({ "variablesReference": variables_reference, "name": name, "value": value }),
+                Duration::from_secs(10),
+            )
+            .await?;
+        Ok(EvalResult {
+            result: body.get("value").and_then(Value::as_str).unwrap_or("").to_string(),
             variables_reference: body.get("variablesReference").and_then(Value::as_i64).unwrap_or(0),
         })
     }
