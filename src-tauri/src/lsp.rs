@@ -164,6 +164,51 @@ fn uri_of(path: &str) -> String {
     format!("file://{path}")
 }
 
+/// Buildable code modules under `root`: directories that hold a build file
+/// (`pom.xml` / `build.gradle[.kts]`) *and* a `src` directory. A pure aggregator
+/// (a parent `pom.xml` with no `src`) is skipped.
+///
+/// Importing these individually as workspace folders — rather than pointing the
+/// server at the repo root — isolates each module's import. In a multi-module
+/// Maven reactor a single broken module (e.g. a libGDX ios/html target whose old
+/// plugins jdtls can't resolve) otherwise fails the *whole* combined import and
+/// leaves every sibling unusable; per-folder import contains the failure.
+fn code_modules(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn is_module(dir: &std::path::Path) -> bool {
+        let has_build = dir.join("pom.xml").exists()
+            || dir.join("build.gradle").exists()
+            || dir.join("build.gradle.kts").exists();
+        has_build && dir.join("src").is_dir()
+    }
+    fn walk(dir: &std::path::Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
+        if depth > 6 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if matches!(name.as_ref(), "target" | "build" | ".git" | "node_modules" | ".metadata" | "src") {
+                continue;
+            }
+            if is_module(&p) {
+                out.push(p.clone());
+            }
+            walk(&p, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    if is_module(root) {
+        out.push(root.to_path_buf());
+    }
+    walk(root, 0, &mut out);
+    out
+}
+
 /// Locate the java-debug plugin bundle (`com.microsoft.java.debug.plugin-*.jar`).
 /// This jar is loaded into JDT.LS via `initializationOptions.bundles` and provides
 /// the `vscode.java.*` debug commands. Checks `JAVA_DEBUG_BUNDLE`, then the usual
@@ -232,8 +277,10 @@ async fn write_msg(writer: &Arc<tokio::sync::Mutex<ChildStdin>>, value: &Value) 
 impl LspClient {
     pub async fn start(app: AppHandle, root: &str) -> Result<LspClient> {
         // JDT.LS keeps its index in a per-project workspace directory.
+        // The version suffix lets us invalidate stale indexes when the import
+        // strategy changes (v2 = per-module workspace folders).
         let data_dir = std::env::temp_dir()
-            .join("reevik-java-ade-jdtls")
+            .join("reevik-java-ade-jdtls-v2")
             .join(root.trim_start_matches('/').replace('/', "%"));
         let _ = std::fs::create_dir_all(&data_dir);
         let launch = find_jdtls(&data_dir).context(JDTLS_MISSING)?;
@@ -369,14 +416,36 @@ impl LspClient {
             .map(|p| vec![p.to_string_lossy().into_owned()])
             .unwrap_or_default();
 
+        // Import each code module as its own workspace folder when the project has
+        // more than one, so one un-importable module can't break the rest. A
+        // single-module project keeps the plain rootUri behaviour.
+        let modules = code_modules(std::path::Path::new(root));
+        let multi = modules.len() > 1;
+        let folders: Vec<Value> = modules
+            .iter()
+            .map(|p| {
+                let uri = uri_of(&p.to_string_lossy());
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                json!({ "uri": uri, "name": name })
+            })
+            .collect();
+        let folder_uris: Vec<String> = modules.iter().map(|p| uri_of(&p.to_string_lossy())).collect();
+        let init_options = if multi {
+            json!({ "bundles": bundles, "workspaceFolders": folder_uris })
+        } else {
+            json!({ "bundles": bundles })
+        };
+
         // Handshake.
         client
             .request(
                 "initialize",
                 json!({
                     "processId": std::process::id(),
-                    "rootUri": uri_of(root),
-                    "initializationOptions": { "bundles": bundles },
+                    // Multi-module: no single rootUri; hand jdtls the module folders.
+                    "rootUri": if multi { Value::Null } else { json!(uri_of(root)) },
+                    "workspaceFolders": if multi { Value::Array(folders) } else { Value::Null },
+                    "initializationOptions": init_options,
                     "capabilities": {
                         "textDocument": {
                             // Snippets let rust-analyzer add call parens (`foo($0)`)
@@ -393,7 +462,7 @@ impl LspClient {
                                 }
                             }
                         },
-                        "workspace": { "configuration": true }
+                        "workspace": { "configuration": true, "workspaceFolders": true }
                     }
                 }),
                 Duration::from_secs(30),
