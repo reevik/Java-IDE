@@ -53,6 +53,11 @@ fn describe_launch_error(msg: &str) -> String {
     }
 }
 
+/// A Java identifier character (for detecting simple `a.b.c` field paths).
+fn ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$'
+}
+
 #[derive(serde::Serialize)]
 pub struct StackFrame {
     pub id: i64,
@@ -423,18 +428,55 @@ impl DapClient {
             .collect())
     }
 
+    /// Resolve a simple dotted identifier path (`config.forceExit`) to its live
+    /// `Variable` by walking scopes → variables, without compiling anything.
+    /// `None` when a segment isn't found (or the expression isn't a plain path).
+    async fn resolve_var_path(&self, frame_id: i64, segs: &[&str]) -> Option<Variable> {
+        if segs.is_empty() || !segs.iter().all(|s| !s.is_empty() && s.chars().all(ident_char)) {
+            return None;
+        }
+        let mut pool: Vec<Variable> = Vec::new();
+        for s in self.scopes(frame_id).await.ok()? {
+            if let Ok(v) = self.variables(s.variables_reference).await {
+                pool.extend(v);
+            }
+        }
+        let mut cur = pool.into_iter().find(|v| v.name == segs[0])?;
+        for seg in &segs[1..] {
+            if cur.variables_reference <= 0 {
+                return None;
+            }
+            let children = self.variables(cur.variables_reference).await.ok()?;
+            cur = children.into_iter().find(|v| &v.name == seg)?;
+        }
+        Some(cur)
+    }
+
     pub async fn evaluate(&self, frame_id: i64, expr: &str) -> Result<EvalResult> {
-        let body = self
+        // Prefer the adapter's evaluator (handles arbitrary expressions).
+        match self
             .request(
                 "evaluate",
                 json!({ "expression": expr, "frameId": frame_id, "context": "repl" }),
                 Duration::from_secs(10),
             )
-            .await?;
-        Ok(EvalResult {
-            result: body.get("result").and_then(Value::as_str).unwrap_or("").to_string(),
-            variables_reference: body.get("variablesReference").and_then(Value::as_i64).unwrap_or(0),
-        })
+            .await
+        {
+            Ok(body) => Ok(EvalResult {
+                result: body.get("result").and_then(Value::as_str).unwrap_or("").to_string(),
+                variables_reference: body.get("variablesReference").and_then(Value::as_i64).unwrap_or(0),
+            }),
+            // The adapter can't compile expressions when the project didn't import
+            // cleanly (e.g. a libGDX reactor jdtls chokes on). For a plain field
+            // path we can still read the value straight from the variables tree.
+            Err(e) => {
+                let segs: Vec<&str> = expr.split('.').filter(|s| !s.is_empty()).collect();
+                match self.resolve_var_path(frame_id, &segs).await {
+                    Some(v) => Ok(EvalResult { result: v.value, variables_reference: v.variables_reference }),
+                    None => Err(e),
+                }
+            }
+        }
     }
 
     /// REPL completions for `text` with the caret at `column` (1-based, per DAP),
@@ -500,41 +542,14 @@ impl DapClient {
         let mut names: Vec<(String, &'static str)> = Vec::new();
         match &receiver {
             Some(expr) if !expr.is_empty() => {
-                // Resolve `a.b.c` through the live variables tree — this works even
-                // when the project can't be compiled (so `evaluate` is unavailable),
-                // as long as the receiver is a local and its field chain. Fall back
-                // to `evaluate` for anything the tree can't reach (e.g. method calls).
+                // Resolve the receiver through the live variables tree — this works
+                // even when the project can't be compiled (so `evaluate` is
+                // unavailable), as long as it's a local and its field chain. Fall
+                // back to `evaluate` for anything the tree can't reach (method calls).
                 let segs: Vec<&str> = expr.split('.').filter(|s| !s.is_empty()).collect();
-                let simple = !segs.is_empty() && segs.iter().all(|s| s.chars().all(is_ident));
-                let mut fields_ref: Option<i64> = None;
-                if simple {
-                    let mut pool: Vec<Variable> = Vec::new();
-                    if let Ok(scopes) = self.scopes(frame_id).await {
-                        for s in scopes {
-                            if let Ok(v) = self.variables(s.variables_reference).await {
-                                pool.extend(v);
-                            }
-                        }
-                    }
-                    let mut cur = pool.iter().find(|v| v.name == segs[0]).map(|v| v.variables_reference);
-                    for seg in &segs[1..] {
-                        cur = match cur {
-                            Some(r) if r > 0 => self
-                                .variables(r)
-                                .await
-                                .ok()
-                                .and_then(|ch| ch.iter().find(|v| &v.name == seg).map(|v| v.variables_reference)),
-                            _ => None,
-                        };
-                        if cur.is_none() {
-                            break;
-                        }
-                    }
-                    fields_ref = cur.filter(|&r| r > 0);
-                }
-                let child_ref = match fields_ref {
-                    Some(r) => Some(r),
-                    None => self
+                let child_ref = match self.resolve_var_path(frame_id, &segs).await {
+                    Some(v) if v.variables_reference > 0 => Some(v.variables_reference),
+                    _ => self
                         .evaluate(frame_id, expr)
                         .await
                         .ok()
