@@ -822,6 +822,9 @@ function cmdLinkExtension(root: string, path: string, onGoToDefinition: (p: stri
       mousemove(e: MouseEvent) {
         this.lastX = e.clientX;
         this.lastY = e.clientY;
+        // Sync from the event itself — global keydown/keyup for Meta isn't
+        // reliably delivered inside the webview.
+        metaHeld = e.metaKey;
         this.refresh();
       },
       mouseleave() {
@@ -829,8 +832,9 @@ function cmdLinkExtension(root: string, path: string, onGoToDefinition: (p: stri
         this.clear();
       },
       mousedown(e: MouseEvent) {
-        // ⌘-click only. Ignore Ctrl-click (that's the macOS right-click gesture).
-        if (!metaHeld || e.button !== 0 || e.ctrlKey) return;
+        // ⌘-click only. Read metaKey off the event (global tracking is flaky in
+        // the webview). Ignore Ctrl-click (that's the macOS right-click gesture).
+        if (!e.metaKey || e.button !== 0 || e.ctrlKey) return;
         const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
         if (pos == null) return;
         const w = this.view.state.wordAt(pos);
