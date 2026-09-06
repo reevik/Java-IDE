@@ -466,6 +466,38 @@ fn module_dir_of(root: &Path, main_class: &str) -> Option<std::path::PathBuf> {
 /// (a common libGDX/multi-target layout), return that profile's `<id>` so we can
 /// activate it — otherwise the module isn't in the default reactor and `-pl`
 /// can't find it. Light text scan; good enough for the common shapes.
+/// All Java source-root directories under `root` (paths ending in
+/// `src/main/java` or `src/test/java`), so the debugger can map a class back to
+/// its `.java` file even when the language server hasn't resolved the project.
+pub fn source_roots(root: &Path) -> Vec<String> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<String>) {
+        if depth > 8 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if matches!(name.as_ref(), "target" | "build" | ".git" | "node_modules" | ".metadata") {
+                continue;
+            }
+            let s = p.to_string_lossy();
+            if s.ends_with("/src/main/java") || s.ends_with("/src/test/java") {
+                out.push(s.into_owned());
+                continue; // no source roots nested under a source root
+            }
+            walk(&p, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, 0, &mut out);
+    out
+}
+
 /// The module's own `<artifactId>` (ignoring the one inside `<parent>`), which is
 /// the name JDT.LS gives the imported project — java-debug needs it to evaluate
 /// expressions.

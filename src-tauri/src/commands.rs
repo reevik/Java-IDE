@@ -2629,6 +2629,10 @@ pub async fn debug_start(
     };
 
     // 2. Build the java-debug launch config and connect to the DAP server.
+    // Source roots let the adapter map a paused frame's class back to its .java
+    // file (so the editor can follow), which it otherwise gets from the language
+    // server — unavailable when the project didn't import cleanly.
+    let source_paths = cargo::source_roots(&r);
     let launch = serde_json::json!({
         "type": "java",
         "request": "launch",
@@ -2637,6 +2641,7 @@ pub async fn debug_start(
         "projectName": project,
         "classPaths": class_paths,
         "modulePaths": module_paths,
+        "sourcePaths": source_paths,
         "cwd": root,
         "args": args.join(" "),
         "vmArgs": "",
