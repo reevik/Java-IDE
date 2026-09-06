@@ -111,6 +111,12 @@ export function readProjectTree(path: string): Promise<TreeNode[]> {
   return invoke("read_project_tree", { path });
 }
 
+/** Auto-detected source/resource roots (Maven `<build>` config, else conventions):
+ *  project-relative directory path → role. */
+export function detectSourceRoots(path: string): Promise<Record<string, string>> {
+  return invoke("detect_source_roots_cmd", { path });
+}
+
 export function readFile(path: string): Promise<string> {
   return invoke("read_file", { path });
 }

@@ -816,6 +816,153 @@ fn parse_gradle_tree(text: &str) -> Vec<DepNode> {
     roots
 }
 
+// --- Source roots -----------------------------------------------------------
+
+/// Content of the first `<tag>…</tag>`, trimmed. (Light scan; fine for the flat
+/// pom elements we read.)
+fn xml_tag(text: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let s = text.find(&open)? + open.len();
+    let e = text[s..].find(&close)? + s;
+    Some(text[s..e].trim().to_string())
+}
+
+/// Every `<directory>…</directory>` inside the first `<container>…</container>`.
+fn xml_dirs_in(text: &str, container: &str) -> Vec<String> {
+    let open = format!("<{container}>");
+    let close = format!("</{container}>");
+    let Some(s) = text.find(&open).map(|i| i + open.len()) else { return Vec::new() };
+    let Some(e) = text[s..].find(&close).map(|i| i + s) else { return Vec::new() };
+    let block = &text[s..e];
+    let mut out = Vec::new();
+    let mut rest = block;
+    while let Some(i) = rest.find("<directory>") {
+        let from = i + "<directory>".len();
+        if let Some(j) = rest[from..].find("</directory>") {
+            out.push(rest[from..from + j].trim().to_string());
+            rest = &rest[from + j..];
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+/// Resolve a pom-declared directory against `base`, expanding the common
+/// `${project.basedir}` / `${basedir}` properties and normalizing `.`/`..`.
+fn resolve_dir(base: &Path, raw: &str) -> PathBuf {
+    let cleaned = raw
+        .replace("${project.basedir}", ".")
+        .replace("${basedir}", ".")
+        .replace("${project.build.directory}", "target");
+    let joined = if Path::new(&cleaned).is_absolute() {
+        PathBuf::from(&cleaned)
+    } else {
+        base.join(&cleaned)
+    };
+    let mut parts: Vec<std::path::Component> = Vec::new();
+    for c in joined.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                parts.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => parts.push(other),
+        }
+    }
+    parts.iter().collect()
+}
+
+/// Directories under `root` (including it) that hold a Maven/Gradle build file.
+fn build_module_dirs(root: &Path) -> Vec<PathBuf> {
+    fn is_module(d: &Path) -> bool {
+        d.join("pom.xml").exists() || d.join("build.gradle").exists() || d.join("build.gradle.kts").exists()
+    }
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        if depth > 6 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if matches!(name.as_ref(), "target" | "build" | ".git" | "node_modules" | ".idea" | "src") {
+                continue;
+            }
+            if is_module(&p) {
+                out.push(p.clone());
+            }
+            walk(&p, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    if is_module(root) {
+        out.push(root.to_path_buf());
+    }
+    walk(root, 0, &mut out);
+    out
+}
+
+/// Auto-detect source/resource roots: honour a module pom's `<build>` overrides
+/// (`sourceDirectory`, `testSourceDirectory`, `<resources>`, `<testResources>`),
+/// otherwise fall back to the conventional `src/main|test/java|resources` — for
+/// every module in the project. Returns project-relative path → role.
+fn detect_source_roots(root: &Path) -> std::collections::HashMap<String, String> {
+    use std::collections::HashMap;
+    let mut out: HashMap<String, String> = HashMap::new();
+    let add = |out: &mut HashMap<String, String>, abs: PathBuf, kind: &str| {
+        if !abs.is_dir() {
+            return;
+        }
+        if let Ok(rel) = abs.strip_prefix(root) {
+            let r = rel.to_string_lossy().replace('\\', "/");
+            if !r.is_empty() {
+                out.insert(r, kind.to_string());
+            }
+        }
+    };
+    for m in build_module_dirs(root) {
+        let pom = std::fs::read_to_string(m.join("pom.xml")).unwrap_or_default();
+        let src = xml_tag(&pom, "sourceDirectory").map(|p| resolve_dir(&m, &p));
+        let tsrc = xml_tag(&pom, "testSourceDirectory").map(|p| resolve_dir(&m, &p));
+        let mut res: Vec<PathBuf> = xml_dirs_in(&pom, "resources").iter().map(|p| resolve_dir(&m, p)).collect();
+        let mut tres: Vec<PathBuf> = xml_dirs_in(&pom, "testResources").iter().map(|p| resolve_dir(&m, p)).collect();
+        if res.is_empty() {
+            res.push(m.join("src").join("main").join("resources"));
+        }
+        if tres.is_empty() {
+            tres.push(m.join("src").join("test").join("resources"));
+        }
+        add(&mut out, src.unwrap_or_else(|| m.join("src").join("main").join("java")), "sources");
+        add(&mut out, tsrc.unwrap_or_else(|| m.join("src").join("test").join("java")), "tests");
+        for r in res {
+            add(&mut out, r, "resources");
+        }
+        for r in tres {
+            add(&mut out, r, "testResources");
+        }
+    }
+    out
+}
+
+/// Auto-detected source/resource roots (Maven `<build>` config, else conventions).
+#[tauri::command]
+pub async fn detect_source_roots_cmd(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let p = PathBuf::from(&path);
+    ensure_within_projects(&p, &state)?;
+    tokio::task::spawn_blocking(move || detect_source_roots(&p))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // --- Files ------------------------------------------------------------------
 
 #[tauri::command]

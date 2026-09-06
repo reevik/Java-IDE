@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ProjectLauncher from "./components/ProjectLauncher";
 import FileTree, { type NewKind } from "./components/FileTree";
 import ProjectSettingsDialog from "./components/ProjectSettingsDialog";
-import { loadSourceRoots, saveSourceRoots, type SourceRoots } from "./lib/sourceRoots";
+import { DEFAULT_ROOTS, hasSavedSourceRoots, loadSourceRoots, saveSourceRoots, type SourceRoots } from "./lib/sourceRoots";
 import CodeEditor, { type CodeEditorHandle, type Runnable } from "./components/CodeEditor";
 import OutputPanel, { type OutputLine, type OutputTab } from "./components/OutputPanel";
 import DiffView from "./components/DiffView";
@@ -63,6 +63,7 @@ import {
   debugStepOut,
   debugStop,
   gitBranch,
+  detectSourceRoots,
   lspClassFileContents,
   lspDidSave,
   lspSync,
@@ -379,7 +380,19 @@ export default function App() {
   const [sourceRoots, setSourceRoots] = useState<SourceRoots>({});
   const [structureOpen, setStructureOpen] = useState(false);
   useEffect(() => {
-    if (project) setSourceRoots(loadSourceRoots(project.path));
+    if (!project) return;
+    // A user override wins; otherwise auto-detect from the project's Maven build
+    // config (or the conventional src/main/java… layout).
+    if (hasSavedSourceRoots(project.path)) {
+      setSourceRoots(loadSourceRoots(project.path));
+      return;
+    }
+    let alive = true;
+    setSourceRoots({});
+    detectSourceRoots(project.path)
+      .then((roots) => alive && setSourceRoots(roots as SourceRoots))
+      .catch(() => alive && setSourceRoots({ ...DEFAULT_ROOTS }));
+    return () => { alive = false; };
   }, [project?.path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedConfig = runConfigs.find((c) => c.id === selectedConfigId) ?? runConfigs[0];

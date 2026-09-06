@@ -60,6 +60,16 @@ export function saveSourceRoots(root: string, roots: SourceRoots) {
   localStorage.setItem(KEY(root), JSON.stringify(roots));
 }
 
+/** Whether the user has explicitly configured roots for this project (an override
+ *  of the auto-detected ones). */
+export function hasSavedSourceRoots(root: string): boolean {
+  try {
+    return localStorage.getItem(KEY(root)) != null;
+  } catch {
+    return false;
+  }
+}
+
 /** Project-relative path of an absolute path under `rootPath` (posix separators). */
 export function relOf(rootPath: string, absPath: string): string {
   const a = absPath.replace(/\\/g, "/");
