@@ -243,7 +243,7 @@ export default function App() {
   const activeEditor = () => (activeGroupRef.current === 1 ? editorRef2 : editorRef).current;
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const { data: tree } = useQuery({
+  const { data: tree, isFetching: treeLoading } = useQuery({
     queryKey: ["tree", project?.path],
     queryFn: () => readProjectTree(project!.path),
     enabled: !!project,
@@ -1587,6 +1587,7 @@ export default function App() {
                 {leftTab === "project" ? (
                   <FileTree
                     tree={tree ?? []}
+                    loading={treeLoading && !tree}
                     rootPath={project.path}
                     selectedPath={activePath}
                     problemPaths={problemPaths}

@@ -819,10 +819,15 @@ fn parse_gradle_tree(text: &str) -> Vec<DepNode> {
 // --- Files ------------------------------------------------------------------
 
 #[tauri::command]
-pub fn read_project_tree(path: String, state: State<'_, AppState>) -> Result<Vec<TreeNode>, String> {
+pub async fn read_project_tree(path: String, state: State<'_, AppState>) -> Result<Vec<TreeNode>, String> {
     let p = PathBuf::from(&path);
     ensure_within_projects(&p, &state)?;
-    fs_tree::read_tree(&p).map_err(|e| e.to_string())
+    // The recursive filesystem walk can be heavy on a large project — run it off
+    // the UI thread so the app stays responsive while the tree loads.
+    tokio::task::spawn_blocking(move || fs_tree::read_tree(&p))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

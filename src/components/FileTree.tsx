@@ -13,6 +13,14 @@ function loadCollapsed(root: string): Set<string> {
     return new Set();
   }
 }
+/** Whether this project has a remembered expand/collapse state yet. */
+function hasSavedCollapse(root: string): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY(root)) != null;
+  } catch {
+    return false;
+  }
+}
 function saveCollapsed(root: string, set: Set<string>) {
   try {
     localStorage.setItem(COLLAPSE_KEY(root), JSON.stringify([...set]));
@@ -28,6 +36,8 @@ type UiNode = TreeNode & { rootKind?: RootKind; isPackage?: boolean; children?: 
 
 interface Props {
   tree: TreeNode[];
+  /** True while the initial tree is still loading (shows a spinner). */
+  loading?: boolean;
   /** Project root — the target when right-clicking empty space. */
   rootPath: string;
   selectedPath: string | null;
@@ -118,7 +128,7 @@ const PROMPT: Record<NewKind, { title: string; placeholder: string; hint?: strin
 
 interface Menu { x: number; y: number; dir: string; targets: string[] }
 
-export default function FileTree({ tree, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onOpenStructure }: Props) {
+export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onOpenStructure }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(rootPath));
   // Restore the saved expand/collapse state when switching projects.
   useEffect(() => setCollapsed(loadCollapsed(rootPath)), [rootPath]);
@@ -138,6 +148,15 @@ export default function FileTree({ tree, rootPath, selectedPath, problemPaths, s
 
   const filtering = filter.trim() !== "";
   const decorated = useMemo(() => decorateTree(tree, rootPath, sourceRoots), [tree, rootPath, sourceRoots]);
+
+  // A freshly-opened project starts fully collapsed instead of expanding the
+  // whole hierarchy (which is slow on large trees) — the user expands what they
+  // need, and that choice is then remembered.
+  useEffect(() => {
+    if (!decorated.length || hasSavedCollapse(rootPath)) return;
+    writeCollapsed(new Set(allDirPaths(decorated)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decorated, rootPath]);
   const shown = useMemo(() => (filtering ? filterTree(decorated, filter.trim()) : decorated), [decorated, filter, filtering]);
 
   // Flattened order of currently-visible rows, for shift-click range selection.
@@ -279,22 +298,32 @@ export default function FileTree({ tree, rootPath, selectedPath, problemPaths, s
         }}
         className="min-h-0 flex-1 select-none overflow-auto pb-3 pl-2 pr-0.5 outline-none [scrollbar-gutter:stable]"
       >
-        {shown.map((n) => (
-          <Row
-            key={n.path}
-            node={n}
-            depth={0}
-            collapsed={collapsed}
-            forceOpen={filtering}
-            selectedPath={selectedPath}
-            sel={sel}
-            problemPaths={problemPaths}
-            onClickRow={onRowClick}
-            onContext={openMenu}
-          />
-        ))}
-        {shown.length === 0 && (
-          <p className="px-2 py-6 text-center text-[12px] text-[var(--text-tertiary)]">No matching files.</p>
+        {loading && shown.length === 0 ? (
+          <div className="flex items-center gap-2 px-2 py-6 text-[12px] text-[var(--text-tertiary)]">
+            <Spinner /> Loading project…
+          </div>
+        ) : (
+          <>
+            {shown.map((n) => (
+              <Row
+                key={n.path}
+                node={n}
+                depth={0}
+                collapsed={collapsed}
+                forceOpen={filtering}
+                selectedPath={selectedPath}
+                sel={sel}
+                problemPaths={problemPaths}
+                onClickRow={onRowClick}
+                onContext={openMenu}
+              />
+            ))}
+            {shown.length === 0 && (
+              <p className="px-2 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
+                {filtering ? "No matching files." : "Empty project."}
+              </p>
+            )}
+          </>
         )}
       </nav>
 
@@ -494,6 +523,15 @@ function Chevron({ open }: { open: boolean }) {
       className={`shrink-0 text-[var(--text-tertiary)] transition-transform ${open ? "rotate-90" : ""}`}
     >
       <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+/** A small spinning ring for the loading state. */
+function Spinner() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" className="shrink-0 animate-spin text-[var(--text-tertiary)]">
+      <path d="M12 3a9 9 0 1 0 9 9" />
     </svg>
   );
 }
