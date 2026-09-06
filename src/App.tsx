@@ -1219,6 +1219,25 @@ export default function App() {
     await launchDebug(debugTarget);
   }, [project, debugTarget, launchDebug]);
 
+  // Debug the *selected run configuration* (Run and Debug share it), or Continue
+  // when already paused.
+  const debugSelectedConfig = useCallback(async () => {
+    if (!project) return;
+    if (debugStatusRef.current === "paused" && threadIdRef.current != null) {
+      setDebugStatus("running");
+      setStopPos(null);
+      await debugContinue(threadIdRef.current).catch((e) => setDebugConsole((p) => [...p, String(e)]));
+      return;
+    }
+    if (!selectedConfig) return;
+    const target: { kind: "bin" | "test"; name: string | null } =
+      selectedConfig.kind === "test"
+        ? { kind: "test", name: selectedConfig.testFilter?.trim() || null }
+        : { kind: "bin", name: selectedConfig.mainClass?.trim() || info?.bins?.[0] || null };
+    setDebugTarget(target);
+    await launchDebug(target);
+  }, [project, selectedConfig, info, launchDebug]);
+
   // Debug a specific gutter runnable (a main class; tests aren't debuggable yet).
   const debugSymbol = useCallback((run: Runnable) => {
     const target = { kind: (run.kind === "test" ? "test" : "bin") as "bin" | "test", name: run.name };
@@ -1280,7 +1299,7 @@ export default function App() {
       { id: "code.reformat", group: "Code", title: "Reformat Code", hint: "⌘⌥L", disabled: !active || active.readOnly || !active.path.endsWith(".java"), disabledReason: "Open a Java file", run: () => void reformatActive() },
       { id: "cargo.fmt", group: "Build", title: "Format project", hint: "⌘⇧F", disabled: !project, disabledReason: noProject, run: () => void runCargo("fmt") },
       { id: "cargo.cancel", group: "Build", title: "Stop", hint: "⌘.", disabled: !running, disabledReason: "Nothing is running", run: () => void cargoCancel() },
-      { id: "debug.start", group: "Debug", title: debugStatus === "paused" ? "Continue" : "Start Debugging", hint: "F5", disabled: !project, disabledReason: noProject, run: () => void startOrContinue() },
+      { id: "debug.start", group: "Debug", title: debugStatus === "paused" ? "Continue" : "Start Debugging", hint: "F5", disabled: !project, disabledReason: noProject, run: () => void debugSelectedConfig() },
       { id: "debug.step-over", group: "Debug", title: "Step Over", hint: "F10", disabled: debugStatus !== "paused", disabledReason: "Not paused", run: stepOver },
       { id: "debug.step-into", group: "Debug", title: "Step Into", hint: "F11", disabled: debugStatus !== "paused", disabledReason: "Not paused", run: stepInto },
       { id: "debug.step-out", group: "Debug", title: "Step Out", hint: "⇧F11", disabled: debugStatus !== "paused", disabledReason: "Not paused", run: stepOut },
@@ -1311,7 +1330,7 @@ export default function App() {
       { id: "view.palette", group: "View", title: "Command palette", hint: "⌘K", run: () => setShowPalette((v) => !v) },
     ];
     return list;
-  }, [project, running, active, focusedFile, split, secPaths, splitEditor, closeSecTabs, treeHidden, outputHidden, rightPanel, runCargo, saveNow, closeTab, debugStatus, startOrContinue, stepOver, stepInto, stepOut, stopDebug, reformatActive, selectedConfig, runSelectedConfig, breakpoints, cursor, toggleBreakpoint, removeAllBreakpoints, setAllBreakpointsEnabled]);
+  }, [project, running, active, focusedFile, split, secPaths, splitEditor, closeSecTabs, treeHidden, outputHidden, rightPanel, runCargo, saveNow, closeTab, debugStatus, startOrContinue, debugSelectedConfig, stepOver, stepInto, stepOut, stopDebug, reformatActive, selectedConfig, runSelectedConfig, breakpoints, cursor, toggleBreakpoint, removeAllBreakpoints, setAllBreakpointsEnabled]);
 
   const commandsRef = useRef<Command[]>([]);
   commandsRef.current = commands;
@@ -1534,17 +1553,19 @@ export default function App() {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <CargoButton onClick={() => void runCargo("build")} disabled={running} label="Build" hint="⌘B" icon={<HammerIcon />} />
           <RunConfigBar
             configs={runConfigs}
             selected={selectedConfig}
             running={running}
+            debugBusy={debugStatus === "running" || debugStatus === "building"}
+            debugPaused={debugStatus === "paused"}
             onSelect={selectConfig}
             onRun={runSelectedConfig}
+            onDebug={() => void debugSelectedConfig()}
             onEdit={() => setEditingConfigs(true)}
           />
-          <CargoButton onClick={() => void startOrContinue()} disabled={running || debugStatus === "running" || debugStatus === "building"} label="Debug" hint="F5" icon={<BugIcon />} />
-          <CargoButton onClick={() => void runCargo("clippy")} disabled={running} label="Check" hint="⌘L" icon={<SparkleIcon />} />
+          <CargoButton iconOnly onClick={() => void runCargo("build")} disabled={running} label="Build" hint="⌘B" icon={<HammerIcon />} />
+          <CargoButton iconOnly onClick={() => void runCargo("clippy")} disabled={running} label="Check" hint="⌘L" icon={<SparkleIcon />} />
           {running && (
             <button onClick={() => void cargoCancel()} className="btn-bezel ml-1 px-2.5 py-1 text-[12px]">
               Stop
@@ -1992,22 +2013,26 @@ function CargoButton({
   label,
   hint,
   icon,
+  iconOnly,
 }: {
   onClick: () => void;
   disabled: boolean;
   label: string;
   hint: string;
   icon: React.ReactNode;
+  iconOnly?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       title={`${label} (${hint})`}
-      className="flex items-center gap-1.5 rounded-md border border-[color:var(--line)] bg-[var(--control-bg)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--hover)] disabled:opacity-40"
+      className={`flex items-center gap-1.5 rounded-md border border-[color:var(--line)] bg-[var(--control-bg)] py-1 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--hover)] disabled:opacity-40 ${
+        iconOnly ? "px-2" : "px-2.5"
+      }`}
     >
       {icon}
-      {label}
+      {!iconOnly && label}
     </button>
   );
 }
@@ -2068,15 +2093,6 @@ function HammerIcon() {
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-secondary)]">
       <path d="M14 6l4 4M3 21l7.5-7.5M12.5 8.5l3-3 1-1a2.8 2.8 0 0 1 4 4l-1 1-3 3-4-4z" />
       <path d="M9 11l4 4-1.5 1.5a2 2 0 0 1-3 0l-1-1a2 2 0 0 1 0-3z" />
-    </svg>
-  );
-}
-
-function BugIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-secondary)]">
-      <rect x="8" y="6" width="8" height="12" rx="4" />
-      <path d="M12 6V4M9 6l-1.5-2M15 6l1.5-2M8 11H4M20 11h-4M8 15l-4 2M20 17l-4-2M12 10v6" />
     </svg>
   );
 }

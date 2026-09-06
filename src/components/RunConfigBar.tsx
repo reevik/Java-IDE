@@ -6,13 +6,19 @@ interface Props {
   configs: RunConfig[];
   selected: RunConfig | undefined;
   running: boolean;
+  /** True while a debug session is building/running (Debug disabled), unless paused. */
+  debugBusy: boolean;
+  /** True when the debuggee is paused — the Debug button becomes Continue. */
+  debugPaused: boolean;
   onSelect: (id: string) => void;
   onRun: () => void;
+  onDebug: () => void;
   onEdit: () => void;
 }
 
-/** IntelliJ-style run widget: a config picker fused to a green Run button. */
-export default function RunConfigBar({ configs, selected, running, onSelect, onRun, onEdit }: Props) {
+/** IntelliJ-style run widget: a config picker fused to Run + Debug buttons that
+ *  both act on the selected configuration. */
+export default function RunConfigBar({ configs, selected, running, debugBusy, debugPaused, onSelect, onRun, onDebug, onEdit }: Props) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -40,6 +46,18 @@ export default function RunConfigBar({ configs, selected, running, onSelect, onR
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
             <path d="M7 4l12 8-12 8z" />
           </svg>
+        </button>
+        <button
+          onClick={onDebug}
+          disabled={!selected || (debugBusy && !debugPaused)}
+          title={
+            !selected ? "No run configuration"
+              : debugPaused ? "Continue (F5)"
+              : `Debug '${selected.name}' (F5)`
+          }
+          className="flex items-center border-l border-[color:var(--line)] px-2 py-1 text-[var(--text-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
+        >
+          <BugIcon />
         </button>
       </div>
 
@@ -80,6 +98,16 @@ export default function RunConfigBar({ configs, selected, running, onSelect, onR
 
 function Dot() {
   return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />;
+}
+
+function BugIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 6a4 4 0 0 1 8 0" />
+      <rect x="7" y="8" width="10" height="10" rx="5" />
+      <path d="M12 8v10M3 12h4M17 12h4M4 8l3 1M20 8l-3 1M4 17l3-1M20 17l-3-1" />
+    </svg>
+  );
 }
 
 function GearIcon() {
