@@ -440,7 +440,13 @@ impl LspClient {
                 "configuration": { "updateBuildConfiguration": "automatic" }
             }
         });
-        let mut init_options = json!({ "bundles": bundles, "settings": settings.clone() });
+        let mut init_options = json!({
+            "bundles": bundles,
+            "settings": settings.clone(),
+            // Tells JDT.LS the client can open `jdt://` class-file URIs, so Go to
+            // Definition on a library class returns one (otherwise it's suppressed).
+            "extendedClientCapabilities": { "classFileContentsSupport": true }
+        });
         if multi {
             init_options["workspaceFolders"] = json!(folder_uris);
         }
