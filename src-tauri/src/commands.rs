@@ -2662,6 +2662,18 @@ pub async fn debug_start(
         "console": "internalConsole",
         "stopOnEntry": false,
         "shortenCommandLine": "auto",
+        // Skip stepping through JDK/runtime internals (class loading, reflection,
+        // synthetics) so Step Into/Over stays in the user's — and library — code
+        // instead of getting lost in ClassLoader.loadClass etc.
+        "stepFilters": {
+            "classNameFilters": [
+                "java.*", "javax.*", "jakarta.*", "sun.*", "com.sun.*",
+                "jdk.*", "kotlin.*", "scala.*", "org.junit.*"
+            ],
+            "skipSynthetics": true,
+            "skipStaticInitializers": true,
+            "skipConstructors": false
+        },
     });
 
     if let Some(prev) = dap.0.lock().await.take() {
