@@ -436,6 +436,11 @@ export function lspDefinition(
   return invoke("lsp_definition", { root, path, text, line, character });
 }
 
+/** Decompiled/attached source for a `jdt://` library class-file URI. */
+export function lspClassFileContents(root: string, uri: string): Promise<string> {
+  return invoke("lsp_class_file_contents", { root, uri });
+}
+
 /** One text edit within a code action (0-based LSP positions). */
 export interface CodeActionEdit {
   startLine: number;

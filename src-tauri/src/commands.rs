@@ -2335,6 +2335,20 @@ pub async fn lsp_definition(
     Ok(target.map(|(path, line, character)| Definition { path, line, character }))
 }
 
+/// Decompiled/attached source for a `jdt://` class-file URI (library classes
+/// reached via Go to Definition), as plain text.
+#[tauri::command]
+pub async fn lsp_class_file_contents(
+    root: String,
+    uri: String,
+    app: tauri::AppHandle,
+    lsp: State<'_, LspState>,
+) -> Result<String, String> {
+    let mut guard = lsp.0.lock().await;
+    let client = ensure_client(&mut guard, &app, &root).await?;
+    client.class_file_contents(&uri).await.map_err(|e| e.to_string())
+}
+
 /// Find all usages of the symbol at a position (LSP references).
 #[tauri::command]
 pub async fn lsp_references(

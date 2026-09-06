@@ -754,6 +754,19 @@ impl LspClient {
         Ok(resp.get("result").and_then(first_location))
     }
 
+    /// Fetch the source of a `jdt://` class-file URI (JDT.LS's decompiled or
+    /// source-attached view of a library class) as plain text.
+    pub async fn class_file_contents(&self, uri: &str) -> Result<String> {
+        let resp = self
+            .request(
+                "java/classFileContents",
+                json!({ "uri": uri }),
+                Duration::from_secs(10),
+            )
+            .await?;
+        Ok(resp.get("result").and_then(Value::as_str).unwrap_or("").to_string())
+    }
+
     /// Hover info (type signature + docs) at a position, as Markdown. `None` when
     /// there's nothing to show.
     pub async fn hover(&self, path: &str, text: &str, line: u32, character: u32) -> Result<Option<String>> {
@@ -1108,7 +1121,12 @@ fn first_location(result: &Value) -> Option<(String, u32, u32)> {
         let start = range.get("start")?;
         let line = start.get("line").and_then(Value::as_u64)? as u32;
         let ch = start.get("character").and_then(Value::as_u64)? as u32;
-        let path = percent_decode(uri.strip_prefix("file://").unwrap_or(uri));
+        // Library classes come back as `jdt://…` URIs — keep those verbatim (the
+        // client fetches their text via classFileContents); decode file:// paths.
+        let path = match uri.strip_prefix("file://") {
+            Some(p) => percent_decode(p),
+            None => uri.to_string(),
+        };
         Some((path, line, ch))
     };
     match result {

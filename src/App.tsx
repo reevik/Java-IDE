@@ -63,6 +63,7 @@ import {
   debugStepOut,
   debugStop,
   gitBranch,
+  lspClassFileContents,
   lspDidSave,
   lspSync,
   projectInfo,
@@ -105,6 +106,13 @@ function applyEditsToText(text: string, edits: FileEdit["edits"]): string {
 
 function basename(p: string) {
   return p.split("/").pop() || p;
+}
+
+/** Tab label for a `jdt://…/Pkg/Simple.class?=…` library URI: `Simple.java`
+ * (`.java` so the editor highlights the decompiled/attached source as Java). */
+function jdtDisplayName(uri: string) {
+  const m = /\/([^/?]+)\.class(?:\?|$)/.exec(uri);
+  return `${m ? m[1] : "library"}.java`;
 }
 
 function num(key: string, fallback: number) {
@@ -506,11 +514,14 @@ export default function App() {
         setActivePath(path);
       }
       if (filesRef.current.some((f) => f.path === path)) return;
+      // A `jdt://…` URI is a library class reached via Go to Definition: its text
+      // comes from the language server (decompiled or attached source), not disk.
+      const isLibrary = path.includes("://");
       // Files outside the project (deps/std, via Go to Definition) open read-only.
-      const external = !project || !path.startsWith(project.path + "/");
+      const external = isLibrary || !project || !path.startsWith(project.path + "/");
       const entry: OpenFile = {
         path,
-        name: basename(path),
+        name: isLibrary ? jdtDisplayName(path) : basename(path),
         content: "",
         saveState: "saved",
         loading: true,
@@ -523,9 +534,10 @@ export default function App() {
         return next;
       });
       try {
-        const text = await readFile(path);
+        const text =
+          isLibrary && project ? await lspClassFileContents(project.path, path) : await readFile(path);
         patch(path, { content: text, loading: false });
-        syncLsp(path, text);
+        if (!isLibrary) syncLsp(path, text); // library buffers aren't tracked as files
       } catch (e) {
         console.error(e);
         patch(path, { content: `// failed to open: ${e}`, loading: false, saveState: "error" });
@@ -829,7 +841,9 @@ export default function App() {
   const jumpTo = useCallback(
     async (file: string, line: number, column: number) => {
       if (!project) return;
-      const abs = file.startsWith("/") ? file : `${project.path}/${file}`;
+      // Absolute paths and scheme URIs (jdt:// library classes) pass through;
+      // bare paths are resolved against the project root.
+      const abs = file.startsWith("/") || file.includes("://") ? file : `${project.path}/${file}`;
       await openFile(abs);
       // Let the editor mount for a newly opened file before moving the cursor.
       setTimeout(() => activeEditor()?.goTo(line, column), 60);

@@ -389,6 +389,7 @@ pub fn run() {
             commands::lsp_completion,
             commands::lsp_hover,
             commands::lsp_definition,
+            commands::lsp_class_file_contents,
             commands::lsp_references,
             commands::lsp_rename,
             commands::code_action,
