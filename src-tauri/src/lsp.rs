@@ -278,9 +278,9 @@ impl LspClient {
     pub async fn start(app: AppHandle, root: &str) -> Result<LspClient> {
         // JDT.LS keeps its index in a per-project workspace directory.
         // The version suffix lets us invalidate stale indexes when the import
-        // strategy changes (v2 = per-module workspace folders).
+        // strategy changes (v3 = per-module folders + source-jar download).
         let data_dir = std::env::temp_dir()
-            .join("reevik-java-ade-jdtls-v2")
+            .join("reevik-java-ade-jdtls-v3")
             .join(root.trim_start_matches('/').replace('/', "%"));
         let _ = std::fs::create_dir_all(&data_dir);
         let launch = find_jdtls(&data_dir).context(JDTLS_MISSING)?;
@@ -430,11 +430,20 @@ impl LspClient {
             })
             .collect();
         let folder_uris: Vec<String> = modules.iter().map(|p| uri_of(&p.to_string_lossy())).collect();
-        let init_options = if multi {
-            json!({ "bundles": bundles, "workspaceFolders": folder_uris })
-        } else {
-            json!({ "bundles": bundles })
-        };
+        // Ask m2e/Buildship to download and attach dependency source jars, so Go to
+        // Definition on a library class shows real source instead of a decompile.
+        let settings = json!({
+            "java": {
+                "maven": { "downloadSources": true },
+                "eclipse": { "downloadSources": true },
+                "import": { "maven": { "enabled": true } },
+                "configuration": { "updateBuildConfiguration": "automatic" }
+            }
+        });
+        let mut init_options = json!({ "bundles": bundles, "settings": settings.clone() });
+        if multi {
+            init_options["workspaceFolders"] = json!(folder_uris);
+        }
 
         // Handshake.
         client
@@ -470,6 +479,10 @@ impl LspClient {
             .await
             .context("initialize")?;
         client.notify("initialized", json!({})).await?;
+        // jdtls applies workspace settings from didChangeConfiguration.
+        client
+            .notify("workspace/didChangeConfiguration", json!({ "settings": settings }))
+            .await?;
         Ok(client)
     }
 
