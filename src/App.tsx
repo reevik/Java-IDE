@@ -109,6 +109,10 @@ function basename(p: string) {
   return p.split("/").pop() || p;
 }
 
+/** Cap on simultaneously-open editor tabs; opening more evicts the oldest one
+ *  that's safe to close (not pinned, not unsaved). */
+const MAX_OPEN = 30;
+
 /** Tab label for a `jdt://…/Pkg/Simple.class?=…` library URI: `Simple.java`
  * (`.java` so the editor highlights the decompiled/attached source as Java). */
 function jdtDisplayName(uri: string) {
@@ -527,6 +531,14 @@ export default function App() {
         setActivePath(path);
       }
       if (filesRef.current.some((f) => f.path === path)) return;
+      // Keep the open-tab count bounded: before opening a new one, evict the
+      // oldest tab that's safe to close (not pinned, not unsaved).
+      if (filesRef.current.length >= MAX_OPEN) {
+        const victim = filesRef.current.find(
+          (f) => f.path !== path && !pinnedRef.current.has(f.path) && f.saveState === "saved",
+        );
+        if (victim) closeTabRef.current(victim.path);
+      }
       // A `jdt://…` URI is a library class reached via Go to Definition: its text
       // comes from the language server (decompiled or attached source), not disk.
       const isLibrary = path.includes("://");
@@ -757,6 +769,8 @@ export default function App() {
     });
     closeSecTabs([path]); // the buffer is gone — drop it from the split group too
   }, [saveNow, closeSecTabs]);
+  const closeTabRef = useRef(closeTab);
+  closeTabRef.current = closeTab;
 
   // Close a set of tabs at once (Close Others / Close All / Close to the Right / …).
   // Pinned tabs are always kept.
@@ -2167,7 +2181,7 @@ function TabStrip({
               e.preventDefault();
               setMenu({ x: e.clientX, y: e.clientY, path: f.path });
             }}
-            className={`group flex min-w-0 max-w-[220px] shrink-0 cursor-default items-center gap-1.5 border-r px-3 text-[12px] ${
+            className={`group flex min-w-[84px] max-w-[200px] flex-shrink cursor-default items-center gap-1.5 border-r px-3 text-[12px] ${
               i === lastPinnedIdx ? "border-r-2 border-[color:var(--accent-soft)]" : "border-[color:var(--line)]"
             } ${active ? "bg-[var(--control-bg)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--hover)]"}`}
           >
