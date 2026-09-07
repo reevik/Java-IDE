@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { TreeNode } from "../lib/types";
+import { detectSourceRoots } from "../lib/api";
 import DependenciesView from "./DependenciesView";
 import {
   DEFAULT_ROOTS,
@@ -42,6 +43,27 @@ const MARK_ORDER: RootKind[] = ["sources", "tests", "resources", "testResources"
 export default function ProjectSettingsDialog({ rootPath, tree, roots, about, onSave, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("sources");
   const [draft, setDraft] = useState<SourceRoots>({ ...roots });
+  const [detecting, setDetecting] = useState(false);
+  // Detected roots awaiting the user's confirmation to replace the current ones.
+  const [detected, setDetected] = useState<SourceRoots | null>(null);
+  const [detectNote, setDetectNote] = useState<string | null>(null);
+
+  const runDetect = async () => {
+    setDetectNote(null);
+    setDetecting(true);
+    try {
+      const found = (await detectSourceRoots(rootPath)) as SourceRoots;
+      if (Object.keys(found).length === 0) {
+        setDetectNote("No source or resource paths found in the build files.");
+      } else {
+        setDetected(found); // ask before replacing
+      }
+    } catch (e) {
+      setDetectNote(`Detection failed: ${String(e)}`);
+    } finally {
+      setDetecting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30" onClick={onClose}>
@@ -82,9 +104,21 @@ export default function ProjectSettingsDialog({ rootPath, tree, roots, about, on
 
         <div className="flex shrink-0 items-center justify-between border-t border-[color:var(--line)] px-4 py-3">
           {tab === "sources" ? (
-            <button onClick={() => setDraft({ ...DEFAULT_ROOTS })} className="btn-bezel px-2.5 py-1.5 text-[11.5px]">
-              Reset to Maven/Gradle defaults
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void runDetect()}
+                disabled={detecting}
+                title="Detect source & resource roots from the project's build files"
+                className="btn-bezel flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] disabled:opacity-50"
+              >
+                {detecting ? <MiniSpinner /> : <WandGlyph />}
+                {detecting ? "Detecting…" : "Detect source paths"}
+              </button>
+              <button onClick={() => setDraft({ ...DEFAULT_ROOTS })} className="btn-bezel px-2.5 py-1.5 text-[11.5px]">
+                Reset to defaults
+              </button>
+              {detectNote && <span className="text-[11px] text-[var(--text-tertiary)]">{detectNote}</span>}
+            </div>
           ) : <span />}
           <div className="flex gap-2">
             <button onClick={onClose} className="btn-bezel px-3 py-1.5 text-[12.5px]">Cancel</button>
@@ -92,6 +126,35 @@ export default function ProjectSettingsDialog({ rootPath, tree, roots, about, on
           </div>
         </div>
       </div>
+
+      {detected && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40" onClick={(e) => { e.stopPropagation(); setDetected(null); }}>
+          <div className="switch-dialog w-[420px] rounded-xl p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-1 text-[13.5px] font-semibold text-[var(--text-primary)]">Replace source roots?</h3>
+            <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+              Detected {Object.keys(detected).length} source/resource {Object.keys(detected).length === 1 ? "path" : "paths"} from the build files. This will
+              replace your current configuration.
+            </p>
+            <div className="mb-4 max-h-40 overflow-auto rounded-md border border-[color:var(--line)] p-2">
+              {Object.entries(detected).sort().map(([path, kind]) => (
+                <div key={path} className="flex items-center gap-2 py-0.5 font-mono text-[11px]">
+                  <span className={`shrink-0 ${ROOT_COLOR[kind as RootKind]}`}>{ROOT_LABEL[kind as RootKind]}</span>
+                  <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]" title={path}>{path}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDetected(null)} className="btn-bezel px-3 py-1.5 text-[12.5px]">Cancel</button>
+              <button
+                onClick={() => { setDraft({ ...detected }); setDetected(null); }}
+                className="btn-accent px-3 py-1.5 text-[12.5px]"
+              >
+                Replace
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -294,6 +357,20 @@ function XGlyph() {
   return (
     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+function WandGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <path d="M15 4V2M15 10V8M11 6H9M21 6h-2M18.5 3.5l-1.4 1.4M18.5 8.5l-1.4-1.4M3 21l9-9M12.5 8.5l3 3" />
+    </svg>
+  );
+}
+function MiniSpinner() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" className="shrink-0 animate-spin">
+      <path d="M12 3a9 9 0 1 0 9 9" />
     </svg>
   );
 }
