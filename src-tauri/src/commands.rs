@@ -874,77 +874,114 @@ fn resolve_dir(base: &Path, raw: &str) -> PathBuf {
     parts.iter().collect()
 }
 
-/// Directories under `root` (including it) that hold a Maven/Gradle build file.
-fn build_module_dirs(root: &Path) -> Vec<PathBuf> {
-    fn is_module(d: &Path) -> bool {
-        d.join("pom.xml").exists() || d.join("build.gradle").exists() || d.join("build.gradle.kts").exists()
+/// Insert `abs` (if it's a directory) as a project-relative root of `kind`,
+/// without overwriting an existing mark for that path.
+fn add_root(root: &Path, abs: &Path, kind: &str, out: &mut std::collections::HashMap<String, String>) {
+    if !abs.is_dir() {
+        return;
     }
-    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-        if depth > 6 {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for e in entries.flatten() {
-            let p = e.path();
-            if !p.is_dir() {
-                continue;
-            }
-            let name = e.file_name();
-            let name = name.to_string_lossy();
-            if matches!(name.as_ref(), "target" | "build" | ".git" | "node_modules" | ".idea" | "src") {
-                continue;
-            }
-            if is_module(&p) {
-                out.push(p.clone());
-            }
-            walk(&p, depth + 1, out);
+    if let Ok(rel) = abs.strip_prefix(root) {
+        let r = rel.to_string_lossy().replace('\\', "/");
+        if !r.is_empty() {
+            out.entry(r).or_insert_with(|| kind.to_string());
         }
     }
-    let mut out = Vec::new();
-    if is_module(root) {
-        out.push(root.to_path_buf());
-    }
-    walk(root, 0, &mut out);
-    out
 }
 
-/// Auto-detect source/resource roots: honour a module pom's `<build>` overrides
-/// (`sourceDirectory`, `testSourceDirectory`, `<resources>`, `<testResources>`),
-/// otherwise fall back to the conventional `src/main|test/java|resources` — for
-/// every module in the project. Returns project-relative path → role.
+/// Conventional source-set leaves: `src/<phase>/<lang>` → role.
+const SRC_SETS: &[(&str, &str, &str)] = &[
+    ("main", "java", "sources"),
+    ("main", "kotlin", "sources"),
+    ("main", "scala", "sources"),
+    ("main", "groovy", "sources"),
+    ("main", "resources", "resources"),
+    ("test", "java", "tests"),
+    ("test", "kotlin", "tests"),
+    ("test", "scala", "tests"),
+    ("test", "groovy", "tests"),
+    ("test", "resources", "testResources"),
+];
+
+/// Walk the project for every `src/` directory and record the conventional
+/// source-set leaves inside it. Works regardless of build files — Gradle modules
+/// are declared in settings.gradle, so many have no build.gradle of their own.
+fn scan_src_dirs(dir: &Path, root: &Path, depth: usize, out: &mut std::collections::HashMap<String, String>) {
+    if depth > 10 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if matches!(name.as_ref(), "target" | "build" | "bin" | "out" | ".git" | "node_modules" | ".idea" | ".gradle" | ".metadata") {
+            continue;
+        }
+        if name == "src" {
+            for (phase, lang, kind) in SRC_SETS {
+                add_root(root, &p.join(phase).join(lang), kind, out);
+            }
+            continue; // don't descend into a source tree
+        }
+        scan_src_dirs(&p, root, depth + 1, out);
+    }
+}
+
+/// Every `pom.xml` under `root` (skipping build/vcs dirs), for reading Maven
+/// `<build>` overrides that a plain convention scan can't see.
+fn find_poms(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > 8 {
+        return;
+    }
+    if dir.join("pom.xml").exists() {
+        out.push(dir.to_path_buf());
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if matches!(name.as_ref(), "target" | "build" | "bin" | "out" | ".git" | "node_modules" | ".idea" | "src") {
+            continue;
+        }
+        find_poms(&p, depth + 1, out);
+    }
+}
+
+/// Auto-detect source/resource roots for the whole project: scan for the
+/// conventional `src/{main,test}/{java,kotlin,…}` layout (covers Gradle modules
+/// with no build.gradle of their own), then layer on any Maven pom `<build>`
+/// overrides (`sourceDirectory`, `testSourceDirectory`, `<resources>`,
+/// `<testResources>` — e.g. a resource dir pointed outside the module).
 fn detect_source_roots(root: &Path) -> std::collections::HashMap<String, String> {
     use std::collections::HashMap;
     let mut out: HashMap<String, String> = HashMap::new();
-    let add = |out: &mut HashMap<String, String>, abs: PathBuf, kind: &str| {
-        if !abs.is_dir() {
-            return;
-        }
-        if let Ok(rel) = abs.strip_prefix(root) {
-            let r = rel.to_string_lossy().replace('\\', "/");
-            if !r.is_empty() {
-                out.insert(r, kind.to_string());
-            }
-        }
-    };
-    for m in build_module_dirs(root) {
+
+    // 1. Convention scan.
+    scan_src_dirs(root, root, 0, &mut out);
+
+    // 2. Maven overrides.
+    let mut poms = Vec::new();
+    find_poms(root, 0, &mut poms);
+    for m in poms {
         let pom = std::fs::read_to_string(m.join("pom.xml")).unwrap_or_default();
-        let src = xml_tag(&pom, "sourceDirectory").map(|p| resolve_dir(&m, &p));
-        let tsrc = xml_tag(&pom, "testSourceDirectory").map(|p| resolve_dir(&m, &p));
-        let mut res: Vec<PathBuf> = xml_dirs_in(&pom, "resources").iter().map(|p| resolve_dir(&m, p)).collect();
-        let mut tres: Vec<PathBuf> = xml_dirs_in(&pom, "testResources").iter().map(|p| resolve_dir(&m, p)).collect();
-        if res.is_empty() {
-            res.push(m.join("src").join("main").join("resources"));
+        if let Some(src) = xml_tag(&pom, "sourceDirectory") {
+            add_root(root, &resolve_dir(&m, &src), "sources", &mut out);
         }
-        if tres.is_empty() {
-            tres.push(m.join("src").join("test").join("resources"));
+        if let Some(tsrc) = xml_tag(&pom, "testSourceDirectory") {
+            add_root(root, &resolve_dir(&m, &tsrc), "tests", &mut out);
         }
-        add(&mut out, src.unwrap_or_else(|| m.join("src").join("main").join("java")), "sources");
-        add(&mut out, tsrc.unwrap_or_else(|| m.join("src").join("test").join("java")), "tests");
-        for r in res {
-            add(&mut out, r, "resources");
+        for r in xml_dirs_in(&pom, "resources") {
+            add_root(root, &resolve_dir(&m, &r), "resources", &mut out);
         }
-        for r in tres {
-            add(&mut out, r, "testResources");
+        for r in xml_dirs_in(&pom, "testResources") {
+            add_root(root, &resolve_dir(&m, &r), "testResources", &mut out);
         }
     }
     out
