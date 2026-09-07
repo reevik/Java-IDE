@@ -295,6 +295,9 @@ impl LspClient {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
+            // Kill the server when the client is dropped (e.g. a JDK change
+            // restarts it) so we don't leak orphaned jdtls processes.
+            .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("spawning {}", launch.program))?;
 

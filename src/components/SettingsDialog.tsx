@@ -367,8 +367,9 @@ function JavaTab() {
           </div>
         )}
         <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
-          The selected JDK is used for build/run, the language server, and formatting; its{" "}
-          <code className="font-mono">JAVA_HOME</code> is passed to Maven/Gradle.
+          The selected JDK is used for build, run, debug, the language server, and formatting; its{" "}
+          <code className="font-mono">JAVA_HOME</code> is passed to Maven/Gradle. Changing it restarts
+          the language server (re-indexing the project).
         </p>
       </Section>
 

@@ -1976,9 +1976,29 @@ pub fn set_window_theme(window: tauri::WebviewWindow, dark: bool) {
 
 /// Set the toolchain bin directory the IDE uses (None → auto via PATH). In-memory;
 /// the frontend persists it and re-applies on startup.
+///
+/// Build and run already pick up the selection on their next invocation. The
+/// language server (and the debugger it hosts) is launched once with the JDK's
+/// `JAVA_HOME`, so when the selection actually changes we restart it — and drop
+/// any live debug session — so editor features and debugging use the new JDK too.
 #[tauri::command]
-pub fn set_toolchain_dir(dir: Option<String>) {
+pub async fn set_toolchain_dir(
+    dir: Option<String>,
+    lsp: State<'_, LspState>,
+    dap: State<'_, DapState>,
+) -> Result<(), String> {
+    let normalized = dir.clone().filter(|d| !d.trim().is_empty());
+    let changed = crate::toolchain::dir() != normalized;
     crate::toolchain::set_dir(dir);
+    if changed {
+        // Dropping the client kills the old jdtls (kill_on_drop); the next LSP
+        // request re-spawns it with the new JAVA_HOME.
+        *lsp.0.lock().await = None;
+        if let Some(prev) = dap.0.lock().await.take() {
+            let _ = prev.disconnect().await;
+        }
+    }
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
