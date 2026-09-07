@@ -2055,31 +2055,140 @@ pub struct JdkInfo {
     pub bin: String,
 }
 
-/// Enumerate the JDKs installed on this machine via `/usr/libexec/java_home -X`
-/// (macOS). Returns an empty list on other platforms or when none are found.
+/// Resolve `p` to an actual JDK home (a directory whose `bin/java` exists),
+/// trying the common wrappers (bundle `Contents/Home`, Homebrew keg layout).
+fn resolve_jdk_home(p: &Path) -> Option<PathBuf> {
+    for cand in [
+        p.to_path_buf(),
+        p.join("Contents").join("Home"),
+        p.join("libexec").join("openjdk.jdk").join("Contents").join("Home"),
+    ] {
+        if cand.join("bin").join("java").exists() {
+            return Some(cand);
+        }
+    }
+    None
+}
+
+/// Read a JDK's `release` file for version/vendor/arch (falling back to running
+/// `java -version` if it's absent).
+fn jdk_info(home: &Path) -> Option<JdkInfo> {
+    let bin = home.join("bin");
+    if !bin.join("java").exists() {
+        return None;
+    }
+    let release = std::fs::read_to_string(home.join("release")).unwrap_or_default();
+    let field = |k: &str| {
+        release
+            .lines()
+            .find_map(|l| l.strip_prefix(&format!("{k}=")))
+            .map(|v| v.trim().trim_matches('"').to_string())
+    };
+    let mut version = field("JAVA_VERSION").unwrap_or_default();
+    let mut vendor = field("IMPLEMENTOR").unwrap_or_default();
+    let arch = field("OS_ARCH").unwrap_or_default();
+    if version.is_empty() {
+        // No release file — ask the runtime directly (prints to stderr).
+        if let Ok(o) = std::process::Command::new(bin.join("java")).arg("-version").output() {
+            let s = String::from_utf8_lossy(&o.stderr);
+            if let Some(line) = s.lines().next() {
+                if let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) {
+                    if b > a {
+                        version = line[a + 1..b].to_string();
+                    }
+                }
+                if line.contains("openjdk") && vendor.is_empty() {
+                    vendor = "OpenJDK".into();
+                }
+            }
+        }
+    }
+    if version.is_empty() {
+        return None;
+    }
+    let name = if vendor.is_empty() { format!("Java {version}") } else { format!("{vendor} {version}") };
+    Some(JdkInfo {
+        name,
+        version,
+        vendor,
+        arch,
+        bin: bin.to_string_lossy().into_owned(),
+        home: home.to_string_lossy().into_owned(),
+    })
+}
+
+/// Immediate subdirectories of `dir` (empty when it's missing).
+fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .unwrap_or_default()
+}
+
+/// Enumerate the JDKs installed on this machine: the macOS-registered ones plus
+/// the usual unregistered install locations (Homebrew, SDKMAN, asdf, both
+/// JavaVirtualMachines dirs). Deduplicated by canonical path, newest first.
 #[tauri::command]
 pub fn detected_jdks() -> Vec<JdkInfo> {
-    let out = std::process::Command::new("/usr/libexec/java_home").arg("-X").output();
-    let text = match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
-        _ => return Vec::new(),
-    };
-    let mut jdks = Vec::new();
-    for chunk in text.split("<dict>").skip(1) {
-        let dict = chunk.split("</dict>").next().unwrap_or("");
-        let home = plist_string(dict, "JVMHomePath").unwrap_or_default();
-        if home.is_empty() {
-            continue;
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // macOS-registered JDKs (via java_home -X).
+    if let Ok(o) = std::process::Command::new("/usr/libexec/java_home").arg("-X").output() {
+        if o.status.success() {
+            let text = String::from_utf8_lossy(&o.stdout);
+            for chunk in text.split("<dict>").skip(1) {
+                let dict = chunk.split("</dict>").next().unwrap_or("");
+                if let Some(home) = plist_string(dict, "JVMHomePath") {
+                    if !home.is_empty() {
+                        candidates.push(PathBuf::from(home));
+                    }
+                }
+            }
         }
-        jdks.push(JdkInfo {
-            name: plist_string(dict, "JVMName").unwrap_or_default(),
-            version: plist_string(dict, "JVMVersion").unwrap_or_default(),
-            vendor: plist_string(dict, "JVMVendor").unwrap_or_default(),
-            arch: plist_string(dict, "JVMArch").unwrap_or_default(),
-            bin: format!("{home}/bin"),
-            home,
-        });
     }
+
+    let home_env = std::env::var("HOME").unwrap_or_default();
+    // Bundle dirs: each <dir>/<jdk>/Contents/Home.
+    for parent in [
+        "/Library/Java/JavaVirtualMachines".to_string(),
+        format!("{home_env}/Library/Java/JavaVirtualMachines"),
+    ] {
+        candidates.extend(subdirs(Path::new(&parent)));
+    }
+    // Homebrew opt symlinks: /opt/homebrew/opt/openjdk*, /usr/local/opt/openjdk*.
+    for base in ["/opt/homebrew/opt", "/usr/local/opt"] {
+        for d in subdirs(Path::new(base)) {
+            if d.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("openjdk")).unwrap_or(false) {
+                candidates.push(d);
+            }
+        }
+    }
+    // Homebrew Cellar: /opt/homebrew/Cellar/openjdk*/<version>.
+    for base in ["/opt/homebrew/Cellar", "/usr/local/Cellar"] {
+        for keg in subdirs(Path::new(base)) {
+            if keg.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("openjdk")).unwrap_or(false) {
+                candidates.extend(subdirs(&keg));
+            }
+        }
+    }
+    // Version managers: SDKMAN and asdf.
+    candidates.extend(subdirs(Path::new(&format!("{home_env}/.sdkman/candidates/java"))));
+    candidates.extend(subdirs(Path::new(&format!("{home_env}/.asdf/installs/java"))));
+
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut jdks: Vec<JdkInfo> = Vec::new();
+    for c in candidates {
+        let Some(home) = resolve_jdk_home(&c) else { continue };
+        let canon = std::fs::canonicalize(&home).unwrap_or_else(|_| home.clone());
+        if !seen.insert(canon) {
+            continue; // same JDK reached via a symlink/alias
+        }
+        if let Some(info) = jdk_info(&home) {
+            jdks.push(info);
+        }
+    }
+    // Newest first (by leading version number, then full string).
+    let major = |v: &str| v.split('.').next().unwrap_or("0").parse::<u32>().unwrap_or(0);
+    jdks.sort_by(|a, b| major(&b.version).cmp(&major(&a.version)).then(b.version.cmp(&a.version)));
     jdks
 }
 
