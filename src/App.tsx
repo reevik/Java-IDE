@@ -12,7 +12,7 @@ import DiffView from "./components/DiffView";
 import MarkdownEditor from "./components/MarkdownEditor";
 import ModulesView from "./components/ModulesView";
 import DependenciesView from "./components/DependenciesView";
-import MavenView from "./components/MavenView";
+import BuildView from "./components/BuildView";
 import CommandPalette, { type Command } from "./components/CommandPalette";
 import QuickOpen, { type QuickFile } from "./components/QuickOpen";
 import SearchOverlay from "./components/SearchOverlay";
@@ -277,8 +277,12 @@ export default function App() {
   const active = files.find((f) => f.path === activePath) ?? null;
   // Secondary group's tab list + active file (a view over the shared buffer pool).
   const secFiles = secPaths.map((p) => files.find((f) => f.path === p)).filter((f): f is OpenFile => !!f);
-  // The Maven panel is only relevant when the project root is a Maven build.
-  const isMaven = !!tree?.some((n) => n.name === "pom.xml");
+  // The Build panel shows the project's build tool (Maven goals / Gradle tasks).
+  const buildTool: "maven" | "gradle" | null = tree?.some((n) => n.name === "pom.xml")
+    ? "maven"
+    : tree?.some((n) => n.name.startsWith("build.gradle"))
+      ? "gradle"
+      : null;
   const secActiveFile = files.find((f) => f.path === secActive) ?? null;
   /** The file the focused group is showing (drives cursor-line commands). */
   const focusedFile = activeGroup === 1 ? secActiveFile : active;
@@ -1635,8 +1639,13 @@ export default function App() {
                 <RailTab active={leftTab === "project"} onClick={() => setLeftTab("project")} title="Project" icon={<FilesIcon />} />
                 <RailTab active={leftTab === "modules"} onClick={() => setLeftTab("modules")} title="Modules" icon={<ModulesRailIcon />} />
                 <RailTab active={leftTab === "dependencies"} onClick={() => setLeftTab("dependencies")} title="Dependencies" icon={<DepsRailIcon />} />
-                {isMaven && (
-                  <RailTab active={leftTab === "maven"} onClick={() => setLeftTab("maven")} title="Maven" icon={<MavenRailIcon />} />
+                {buildTool && (
+                  <RailTab
+                    active={leftTab === "maven"}
+                    onClick={() => setLeftTab("maven")}
+                    title={buildTool === "maven" ? "Maven" : "Gradle"}
+                    icon={<MavenRailIcon />}
+                  />
                 )}
               </nav>
               <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-1">
@@ -1655,8 +1664,8 @@ export default function App() {
                   />
                 ) : leftTab === "modules" ? (
                   <ModulesView root={project.path} activePath={activePath} onOpen={(p, line) => void jumpTo(p, line ?? 1, 1)} />
-                ) : leftTab === "maven" && isMaven ? (
-                  <MavenView running={running} onRun={(goals) => void runGoal(goals)} onStop={() => void cargoCancel()} />
+                ) : leftTab === "maven" && buildTool ? (
+                  <BuildView tool={buildTool} running={running} onRun={(goals) => void runGoal(goals)} onStop={() => void cargoCancel()} />
                 ) : (
                   <DependenciesView root={project.path} />
                 )}

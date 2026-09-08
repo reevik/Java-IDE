@@ -1,33 +1,57 @@
 import { useState } from "react";
 
+export type BuildTool = "maven" | "gradle";
+
 interface Props {
-  /** True while a build/goal is running (disables the run actions, shows Stop). */
+  tool: BuildTool;
+  /** True while a build/goal is running (disables run actions, shows Stop). */
   running: boolean;
-  /** Run the given goals (a lifecycle phase, or a parsed custom line). */
+  /** Run the given goals/tasks (a lifecycle phase, or a parsed custom line). */
   onRun: (goals: string[]) => void;
   onStop: () => void;
 }
 
-/** The Maven default + clean lifecycle phases, IntelliJ-style. Running a phase
- *  runs every phase up to it. */
-const LIFECYCLE: { phase: string; desc: string }[] = [
-  { phase: "clean", desc: "Delete target/ (build outputs)" },
-  { phase: "validate", desc: "Validate the project is correct" },
-  { phase: "compile", desc: "Compile main sources" },
-  { phase: "test", desc: "Run unit tests" },
-  { phase: "package", desc: "Build the JAR/WAR" },
-  { phase: "verify", desc: "Run checks on the package" },
-  { phase: "install", desc: "Install to the local ~/.m2 repository" },
-  { phase: "site", desc: "Generate the project site" },
-  { phase: "deploy", desc: "Deploy to the remote repository" },
-];
+/** Maven default + clean lifecycle phases (running a phase runs every phase up to
+ *  it), and the common Gradle tasks. */
+const GOALS: Record<BuildTool, { name: string; desc: string }[]> = {
+  maven: [
+    { name: "clean", desc: "Delete target/ (build outputs)" },
+    { name: "validate", desc: "Validate the project is correct" },
+    { name: "compile", desc: "Compile main sources" },
+    { name: "test", desc: "Run unit tests" },
+    { name: "package", desc: "Build the JAR/WAR" },
+    { name: "verify", desc: "Run checks on the package" },
+    { name: "install", desc: "Install to the local ~/.m2 repository" },
+    { name: "site", desc: "Generate the project site" },
+    { name: "deploy", desc: "Deploy to the remote repository" },
+  ],
+  gradle: [
+    { name: "clean", desc: "Delete build/ outputs" },
+    { name: "classes", desc: "Compile main classes" },
+    { name: "assemble", desc: "Assemble outputs (no tests)" },
+    { name: "test", desc: "Run tests" },
+    { name: "check", desc: "Run all checks (tests + verification)" },
+    { name: "build", desc: "Assemble and test everything" },
+    { name: "jar", desc: "Build the JAR" },
+    { name: "run", desc: "Run (application plugin)" },
+    { name: "dependencies", desc: "Print the dependency tree" },
+  ],
+};
 
-/** Common one-click combinations. */
-const SHORTCUTS: { label: string; goals: string[] }[] = [
-  { label: "clean install", goals: ["clean", "install"] },
-  { label: "clean package", goals: ["clean", "package"] },
-  { label: "package -DskipTests", goals: ["clean", "package", "-DskipTests"] },
-];
+const SHORTCUTS: Record<BuildTool, { label: string; goals: string[] }[]> = {
+  maven: [
+    { label: "clean install", goals: ["clean", "install"] },
+    { label: "clean package", goals: ["clean", "package"] },
+    { label: "package -DskipTests", goals: ["clean", "package", "-DskipTests"] },
+  ],
+  gradle: [
+    { label: "clean build", goals: ["clean", "build"] },
+    { label: "build -x test", goals: ["build", "-x", "test"] },
+  ],
+};
+
+const LABEL: Record<BuildTool, string> = { maven: "Maven", gradle: "Gradle" };
+const CLI: Record<BuildTool, string> = { maven: "mvn", gradle: "gradle" };
 
 /** Split a custom goal line into args, honoring quotes. */
 function parseGoals(s: string): string[] {
@@ -38,9 +62,9 @@ function parseGoals(s: string): string[] {
   return out;
 }
 
-export default function MavenView({ running, onRun, onStop }: Props) {
+export default function BuildView({ tool, running, onRun, onStop }: Props) {
   const [custom, setCustom] = useState("");
-  const [openLifecycle, setOpenLifecycle] = useState(true);
+  const [openGoals, setOpenGoals] = useState(true);
   const [openShortcuts, setOpenShortcuts] = useState(true);
 
   const run = (goals: string[]) => {
@@ -54,7 +78,7 @@ export default function MavenView({ running, onRun, onStop }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Maven</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{LABEL[tool]}</span>
         {running && (
           <button
             onClick={onStop}
@@ -67,15 +91,15 @@ export default function MavenView({ running, onRun, onStop }: Props) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-3">
-        <Group title="Lifecycle" open={openLifecycle} onToggle={() => setOpenLifecycle((o) => !o)}>
-          {LIFECYCLE.map((l) => (
-            <GoalRow key={l.phase} label={l.phase} title={l.desc} disabled={running} onRun={() => run([l.phase])} />
+        <Group title={tool === "maven" ? "Lifecycle" : "Tasks"} open={openGoals} onToggle={() => setOpenGoals((o) => !o)}>
+          {GOALS[tool].map((g) => (
+            <GoalRow key={g.name} label={g.name} title={g.desc} disabled={running} onRun={() => run([g.name])} />
           ))}
         </Group>
 
         <Group title="Shortcuts" open={openShortcuts} onToggle={() => setOpenShortcuts((o) => !o)}>
-          {SHORTCUTS.map((s) => (
-            <GoalRow key={s.label} label={s.label} title={`mvn ${s.goals.join(" ")}`} disabled={running} onRun={() => run(s.goals)} />
+          {SHORTCUTS[tool].map((s) => (
+            <GoalRow key={s.label} label={s.label} title={`${CLI[tool]} ${s.goals.join(" ")}`} disabled={running} onRun={() => run(s.goals)} />
           ))}
         </Group>
       </div>
@@ -84,13 +108,15 @@ export default function MavenView({ running, onRun, onStop }: Props) {
         className="shrink-0 border-t border-[color:var(--line)] px-2 py-2"
         onSubmit={(e) => { e.preventDefault(); submitCustom(); }}
       >
-        <label className="mb-1 block text-[10.5px] uppercase tracking-wide text-[var(--text-tertiary)]">Run goal</label>
+        <label className="mb-1 block text-[10.5px] uppercase tracking-wide text-[var(--text-tertiary)]">
+          {tool === "maven" ? "Run goal" : "Run task"}
+        </label>
         <div className="flex items-center gap-1.5">
-          <span className="shrink-0 font-mono text-[11.5px] text-[var(--text-tertiary)]">mvn</span>
+          <span className="shrink-0 font-mono text-[11.5px] text-[var(--text-tertiary)]">{CLI[tool]}</span>
           <input
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
-            placeholder="e.g. dependency:tree -Dincludes=…"
+            placeholder={tool === "maven" ? "e.g. dependency:tree -Dincludes=…" : "e.g. :core:test --tests …"}
             disabled={running}
             spellCheck={false}
             className="min-w-0 flex-1 rounded bg-[var(--surface-2)] px-2 py-1 font-mono text-[11.5px] outline-none placeholder:text-[var(--text-tertiary)] disabled:opacity-50"
@@ -132,14 +158,14 @@ function GoalRow({ label, title, disabled, onRun }: { label: string; title: stri
       title={title}
       className="group flex w-full items-center gap-2 rounded px-2 py-[3px] pl-6 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--hover)] disabled:opacity-50"
     >
-      <MavenGoalGlyph />
+      <GoalGlyph />
       <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">{label}</span>
       <PlayGlyph className="shrink-0 text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100" />
     </button>
   );
 }
 
-function MavenGoalGlyph() {
+function GoalGlyph() {
   return (
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--accent-strong,#0a66c2)]">
       <path d="M12 3v18M12 12l7-4M12 12L5 8M12 21l7-4M12 21l-7-4" />
