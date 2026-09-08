@@ -12,7 +12,7 @@ import DiffView from "./components/DiffView";
 import MarkdownEditor from "./components/MarkdownEditor";
 import ModulesView from "./components/ModulesView";
 import DependenciesView from "./components/DependenciesView";
-import BuildView from "./components/BuildView";
+import BuildView, { MavenLogo } from "./components/BuildView";
 import CommandPalette, { type Command } from "./components/CommandPalette";
 import QuickOpen, { type QuickFile } from "./components/QuickOpen";
 import SearchOverlay from "./components/SearchOverlay";
@@ -1644,7 +1644,7 @@ export default function App() {
                     active={leftTab === "maven"}
                     onClick={() => setLeftTab("maven")}
                     title={buildTool === "maven" ? "Maven" : "Gradle"}
-                    icon={<MavenRailIcon />}
+                    icon={buildTool === "maven" ? <MavenLogo size={18} /> : <MavenRailIcon />}
                   />
                 )}
               </nav>
