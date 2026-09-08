@@ -253,25 +253,65 @@ pub async fn run(
     extra: Vec<String>,
     env: std::collections::HashMap<String, String>,
 ) -> Result<i32> {
-    cancel(); // only one at a time — a new Build supersedes the old
+    let Some((program, gradle)) = detect_tool(dir) else {
+        return no_tool(&app);
+    };
+    let params = parse_extra(&extra);
+    let args = tool_args(command, gradle, &params);
+    execute(app, dir, &program, args, env).await
+}
+
+/// Run raw build-tool goals (Maven lifecycle phases from the Maven panel, or a
+/// custom goal line). Maven runs in batch mode; Gradle gets plain console output.
+pub async fn run_goals(
+    app: AppHandle,
+    dir: &Path,
+    goals: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+) -> Result<i32> {
+    let Some((program, gradle)) = detect_tool(dir) else {
+        return no_tool(&app);
+    };
+    let mut args: Vec<String> = Vec::new();
+    if gradle {
+        args.extend(goals);
+        args.push("--console=plain".into());
+    } else {
+        args.push("-B".into());
+        args.extend(goals);
+    }
+    execute(app, dir, &program, args, env).await
+}
+
+/// Emit the "no build tool" error to the output channel and finish.
+fn no_tool(app: &AppHandle) -> Result<i32> {
+    let _ = app.emit(
+        "cargo:event",
+        CargoEvent::Line {
+            stream: "stderr".into(),
+            text: "No pom.xml or build.gradle found — open a Maven or Gradle project.".into(),
+        },
+    );
+    let _ = app.emit("cargo:event", CargoEvent::Finished { code: 1, secs: 0.0 });
+    Ok(1)
+}
+
+/// Spawn `program args` in `dir` with the IDE-selected JDK, stream stdout/stderr
+/// to `cargo:event` (compiler lines → Problems), and emit Finished. Supersedes
+/// any build already running.
+async fn execute(
+    app: AppHandle,
+    dir: &Path,
+    program: &str,
+    args: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+) -> Result<i32> {
+    cancel(); // only one at a time — a new run supersedes the old
     let seq = RUN_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     let started = std::time::Instant::now();
 
-    let Some((program, gradle)) = detect_tool(dir) else {
-        let _ = app.emit(
-            "cargo:event",
-            CargoEvent::Line {
-                stream: "stderr".into(),
-                text: "No pom.xml or build.gradle found — open a Maven or Gradle project.".into(),
-            },
-        );
-        let _ = app.emit("cargo:event", CargoEvent::Finished { code: 1, secs: 0.0 });
-        return Ok(1);
-    };
-
-    let params = parse_extra(&extra);
-    let mut cmd = tokio::process::Command::new(&program);
-    cmd.args(tool_args(command, gradle, &params))
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(&args)
         .current_dir(dir)
         // Prefer the IDE-selected JDK: put its bin on PATH and export JAVA_HOME so
         // Maven/Gradle compile and run against it.

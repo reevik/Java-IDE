@@ -1910,6 +1910,22 @@ pub async fn cargo_run(
         .map_err(|e| e.to_string())
 }
 
+/// Run raw Maven/Gradle goals (the Maven panel: a lifecycle phase, or a custom
+/// goal line). Streams to the same output channel as a normal build.
+#[tauri::command]
+pub async fn run_maven_goals(
+    dir: String,
+    goals: Vec<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<i32, String> {
+    let d = PathBuf::from(&dir);
+    ensure_within_projects(&d, &state)?;
+    cargo::run_goals(app, &d, goals, std::collections::HashMap::new())
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn cargo_cancel() {
     cargo::cancel();

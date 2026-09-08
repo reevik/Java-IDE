@@ -376,6 +376,7 @@ pub fn run() {
             commands::rename_path,
             commands::delete_path,
             commands::cargo_run,
+            commands::run_maven_goals,
             commands::cargo_cancel,
             commands::cargo_is_running,
             commands::ai_backend,

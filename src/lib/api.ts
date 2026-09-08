@@ -163,6 +163,11 @@ export function cargoCancel(): Promise<void> {
   return invoke("cargo_cancel");
 }
 
+/** Run raw Maven/Gradle goals (Maven panel). Streams to the same output channel. */
+export function runMavenGoals(dir: string, goals: string[]): Promise<number> {
+  return invoke("run_maven_goals", { dir, goals });
+}
+
 // --- Search ---
 
 export function searchInFiles(root: string, query: string, caseSensitive: boolean): Promise<SearchMatch[]> {

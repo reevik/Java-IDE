@@ -12,6 +12,7 @@ import DiffView from "./components/DiffView";
 import MarkdownEditor from "./components/MarkdownEditor";
 import ModulesView from "./components/ModulesView";
 import DependenciesView from "./components/DependenciesView";
+import MavenView from "./components/MavenView";
 import CommandPalette, { type Command } from "./components/CommandPalette";
 import QuickOpen, { type QuickFile } from "./components/QuickOpen";
 import SearchOverlay from "./components/SearchOverlay";
@@ -64,6 +65,7 @@ import {
   debugStop,
   gitBranch,
   detectSourceRoots,
+  runMavenGoals,
   lspClassFileContents,
   lspDidSave,
   lspSync,
@@ -194,7 +196,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [gotoLine, setGotoLine] = useState(false);
   const [runMenu, setRunMenu] = useState<{ run: Runnable; path: string; x: number; y: number } | null>(null);
-  const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies">("project");
+  const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies" | "maven">("project");
 
   // Apply persisted AI model + toolchain overrides to the backend on startup.
   useEffect(() => {
@@ -275,6 +277,8 @@ export default function App() {
   const active = files.find((f) => f.path === activePath) ?? null;
   // Secondary group's tab list + active file (a view over the shared buffer pool).
   const secFiles = secPaths.map((p) => files.find((f) => f.path === p)).filter((f): f is OpenFile => !!f);
+  // The Maven panel is only relevant when the project root is a Maven build.
+  const isMaven = !!tree?.some((n) => n.name === "pom.xml");
   const secActiveFile = files.find((f) => f.path === secActive) ?? null;
   /** The file the focused group is showing (drives cursor-line commands). */
   const focusedFile = activeGroup === 1 ? secActiveFile : active;
@@ -822,6 +826,28 @@ export default function App() {
       setOutputHidden(false);
       try {
         await cargoRun(project.path, cmd, extra, env);
+      } catch (e) {
+        setLines((prev) => [...prev, { stream: "stderr", text: String(e) }]);
+        setRunning(false);
+      }
+    },
+    [project, saveNow],
+  );
+
+  /** Run raw Maven goals (from the Maven panel), streaming to the Output panel. */
+  const runGoal = useCallback(
+    async (goals: string[]) => {
+      if (!project || goals.length === 0) return;
+      await Promise.all(filesRef.current.filter((f) => f.saveState !== "saved").map((f) => saveNow(f.path)));
+      setLines([]);
+      setDiagnostics([]);
+      setLastResult(null);
+      setCommand(goals.join(" "));
+      setRunning(true);
+      setOutputHidden(false);
+      setOutputTab("output");
+      try {
+        await runMavenGoals(project.path, goals);
       } catch (e) {
         setLines((prev) => [...prev, { stream: "stderr", text: String(e) }]);
         setRunning(false);
@@ -1609,6 +1635,9 @@ export default function App() {
                 <RailTab active={leftTab === "project"} onClick={() => setLeftTab("project")} title="Project" icon={<FilesIcon />} />
                 <RailTab active={leftTab === "modules"} onClick={() => setLeftTab("modules")} title="Modules" icon={<ModulesRailIcon />} />
                 <RailTab active={leftTab === "dependencies"} onClick={() => setLeftTab("dependencies")} title="Dependencies" icon={<DepsRailIcon />} />
+                {isMaven && (
+                  <RailTab active={leftTab === "maven"} onClick={() => setLeftTab("maven")} title="Maven" icon={<MavenRailIcon />} />
+                )}
               </nav>
               <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-1">
                 {leftTab === "project" ? (
@@ -1626,6 +1655,8 @@ export default function App() {
                   />
                 ) : leftTab === "modules" ? (
                   <ModulesView root={project.path} activePath={activePath} onOpen={(p, line) => void jumpTo(p, line ?? 1, 1)} />
+                ) : leftTab === "maven" && isMaven ? (
+                  <MavenView running={running} onRun={(goals) => void runGoal(goals)} onStop={() => void cargoCancel()} />
                 ) : (
                   <DependenciesView root={project.path} />
                 )}
@@ -2112,6 +2143,15 @@ function DepsRailIcon() {
       <circle cx="18" cy="9" r="2.5" />
       <circle cx="9" cy="18" r="2.5" />
       <path d="M8 7l7.5 1.6M7.5 8.2 8.6 15.5" />
+    </svg>
+  );
+}
+
+function MavenRailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v18M12 12l7-4M12 12 5 8M12 21l7-4M12 21l-7-4M12 12V3" />
+      <circle cx="12" cy="4" r="1.4" fill="currentColor" stroke="none" />
     </svg>
   );
 }
