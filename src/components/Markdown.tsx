@@ -136,7 +136,50 @@ function Prose({ text, resolveRef, onOpen }: { text: string } & RefProps) {
     }
   };
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // GFM table: a row line followed by a `|---|---|` separator.
+    if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      flushPara();
+      flushList();
+      flushQuote();
+      const header = tableCells(line);
+      const rows: string[][] = [];
+      let j = i + 2;
+      for (; j < lines.length; j++) {
+        const r = lines[j];
+        if (r.trim() === "" || !r.includes("|")) break;
+        rows.push(tableCells(r));
+      }
+      out.push(
+        <div key={out.length} className="overflow-x-auto">
+          <table className="w-full border-collapse text-[11.5px]">
+            <thead>
+              <tr>
+                {header.map((c, ci) => (
+                  <th key={ci} className="border border-[color:var(--line)] bg-[var(--surface-2)] px-2 py-1 text-left font-semibold">
+                    {inline(c, resolveRef, onOpen)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) => (
+                <tr key={ri}>
+                  {header.map((_, ci) => (
+                    <td key={ci} className="border border-[color:var(--line)] px-2 py-1 align-top">
+                      {inline(r[ci] ?? "", resolveRef, onOpen)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      i = j - 1;
+      continue;
+    }
     if (line.trim() === "") {
       flushPara();
       flushList();
@@ -186,6 +229,19 @@ function Prose({ text, resolveRef, onOpen }: { text: string } & RefProps) {
   flushList();
   flushQuote();
   return <div className="flex flex-col gap-1.5">{out}</div>;
+}
+
+/** A GFM table separator row, e.g. `|---|:--:|--:|` (with or without edge pipes). */
+function isTableSep(line: string): boolean {
+  const s = line.trim();
+  if (!s.includes("-") || !s.includes("|")) return false;
+  const cells = s.replace(/^\|/, "").replace(/\|$/, "").split("|");
+  return cells.length > 0 && cells.every((c) => /^\s*:?-{1,}:?\s*$/.test(c));
+}
+
+/** Split a `| a | b |` row into trimmed cells (edge pipes optional). */
+function tableCells(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
 }
 
 const SRC_EXT = /\.(rs|toml|md|json|lock|txt|ya?ml|sh|sql)$/i;
