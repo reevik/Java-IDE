@@ -12,7 +12,7 @@ import DiffView from "./components/DiffView";
 import MarkdownEditor from "./components/MarkdownEditor";
 import ModulesView from "./components/ModulesView";
 import DependenciesView from "./components/DependenciesView";
-import BuildView, { MavenLogo } from "./components/BuildView";
+import BuildView, { GradleLogo, MavenLogo } from "./components/BuildView";
 import CommandPalette, { type Command } from "./components/CommandPalette";
 import QuickOpen, { type QuickFile } from "./components/QuickOpen";
 import SearchOverlay from "./components/SearchOverlay";
@@ -1644,7 +1644,7 @@ export default function App() {
                     active={leftTab === "maven"}
                     onClick={() => setLeftTab("maven")}
                     title={buildTool === "maven" ? "Maven" : "Gradle"}
-                    icon={buildTool === "maven" ? <MavenLogo size={18} /> : <MavenRailIcon />}
+                    icon={buildTool === "maven" ? <MavenLogo size={18} /> : <GradleLogo size={18} />}
                   />
                 )}
               </nav>
@@ -2152,15 +2152,6 @@ function DepsRailIcon() {
       <circle cx="18" cy="9" r="2.5" />
       <circle cx="9" cy="18" r="2.5" />
       <path d="M8 7l7.5 1.6M7.5 8.2 8.6 15.5" />
-    </svg>
-  );
-}
-
-function MavenRailIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3v18M12 12l7-4M12 12 5 8M12 21l7-4M12 21l-7-4M12 12V3" />
-      <circle cx="12" cy="4" r="1.4" fill="currentColor" stroke="none" />
     </svg>
   );
 }

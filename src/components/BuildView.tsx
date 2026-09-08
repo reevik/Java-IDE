@@ -79,7 +79,7 @@ export default function BuildView({ tool, running, onRun, onStop }: Props) {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between px-3 py-2">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-          {tool === "maven" && <MavenLogo size={13} className="text-[#C71A36]" />}
+          {tool === "maven" ? <MavenLogo size={13} className="text-[#C71A36]" /> : <GradleLogo size={14} className="text-[#0d9488]" />}
           {LABEL[tool]}
         </span>
         {running && (
@@ -161,17 +161,20 @@ function GoalRow({ tool, label, title, disabled, onRun }: { tool: BuildTool; lab
       title={title}
       className="group flex w-full items-center gap-2 rounded px-2 py-[3px] pl-6 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--hover)] disabled:opacity-50"
     >
-      {tool === "maven" ? <MavenLogo size={13} className="text-[#C71A36]" /> : <GoalGlyph />}
+      {tool === "maven" ? <MavenLogo size={13} className="text-[#C71A36]" /> : <GradleLogo size={14} className="text-[#0d9488]" />}
       <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">{label}</span>
       <PlayGlyph className="shrink-0 text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100" />
     </button>
   );
 }
 
-function GoalGlyph() {
+// (Gradle rows use the Gradle logo below.)
+
+/** The Gradle elephant logo. */
+export function GradleLogo({ size = 14, className = "" }: { size?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--accent-strong,#0a66c2)]">
-      <path d="M12 3v18M12 12l7-4M12 12L5 8M12 21l7-4M12 21l-7-4" />
+    <svg viewBox="0 0 32 32" width={size} height={size} fill="currentColor" role="img" aria-label="Gradle" className={`shrink-0 ${className}`}>
+      <path d="M28.477,7.021a4.436,4.436,0,0,0-6.169-.1.413.413,0,0,0-.133.3.427.427,0,0,0,.123.307l.56.559a.423.423,0,0,0,.553.039,2.517,2.517,0,0,1,1.522-.508,2.545,2.545,0,0,1,1.8,4.343C23.22,15.493,18.5,5.618,7.829,10.7a1.449,1.449,0,0,0-.7,1.924,1.129,1.129,0,0,0,.057.109L9.013,15.9a1.452,1.452,0,0,0,1.962.54l.046-.026-.036.026.812-.456a18.635,18.635,0,0,0,2.557-1.9.443.443,0,0,1,.582-.019.417.417,0,0,1,.06.587.425.425,0,0,1-.06.06,19.372,19.372,0,0,1-2.674,2.017l-.029.016-.811.453a2.263,2.263,0,0,1-1.122.294A2.324,2.324,0,0,1,8.285,16.33L6.552,13.342C3.229,15.69,1.211,20.213,2.294,25.936a.424.424,0,0,0,.417.343H4.68a.421.421,0,0,0,.434-.369,2.89,2.89,0,0,1,5.732,0,.421.421,0,0,0,.411.369h1.92a.425.425,0,0,0,.421-.369,2.887,2.887,0,0,1,5.729,0,.42.42,0,0,0,.417.369h1.9a.419.419,0,0,0,.42-.414c.046-2.677.767-5.752,2.826-7.291C32,13.245,30.126,8.677,28.477,7.021Zm-7.265,8.061v0L19.854,14.4a.854.854,0,1,1,1.358.685Z" />
     </svg>
   );
 }
