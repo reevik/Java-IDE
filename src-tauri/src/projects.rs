@@ -124,7 +124,7 @@ pub fn read_info(dir: &Path) -> Result<ProjectInfo> {
             let name = gradle_string(&settings, "rootProject.name")
                 .or_else(|| gradle_string(&text, "rootProject.name"))
                 .unwrap_or_else(|| dir_name.clone());
-            let version = gradle_assign(&text, "version").unwrap_or_default();
+            let version = gradle_version(dir, &text).unwrap_or_default();
             let edition = gradle_assign(&text, "sourceCompatibility")
                 .map(|s| s.trim_start_matches("JavaVersion.VERSION_").replace('_', "."))
                 .unwrap_or_default();
@@ -143,6 +143,59 @@ pub fn read_info(dir: &Path) -> Result<ProjectInfo> {
         bins: find_main_classes(dir),
         has_lib: dir.join("src/main/java").is_dir(),
     })
+}
+
+/// The project version from a Gradle build. A quoted literal (`version = "1.2"`)
+/// is used directly; an unquoted reference (`version = projectVersion`) is
+/// resolved against `gradle.properties` and, failing that, left empty — never
+/// shown as the bare variable name.
+fn gradle_version(dir: &Path, text: &str) -> Option<String> {
+    for line in text.lines() {
+        let t = line.trim();
+        let Some(rest) = t.strip_prefix("version") else { continue };
+        // Boundary after `version` so it doesn't match `versionCode` etc.
+        if rest.chars().next().map(|c| c.is_alphanumeric() || c == '_').unwrap_or(false) {
+            continue;
+        }
+        let rest = rest.trim_start().strip_prefix('=').unwrap_or("").trim();
+        if rest.is_empty() {
+            continue;
+        }
+        // Quoted literal: use it, unless it interpolates a variable (${…}).
+        if let Some(q) = rest.chars().next().filter(|&c| c == '"' || c == '\'') {
+            let body = &rest[1..];
+            if let Some(end) = body.find(q) {
+                let v = &body[..end];
+                return (!v.is_empty() && !v.contains('$')).then(|| v.to_string());
+            }
+            return None;
+        }
+        // Unquoted → a variable/property reference. Resolve a bare identifier
+        // from gradle.properties; give up (empty) on anything more complex.
+        let ident: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '.').collect();
+        return gradle_property(dir, &ident);
+    }
+    None
+}
+
+/// Value of a plain `key=value` line in the project's `gradle.properties`.
+fn gradle_property(dir: &Path, key: &str) -> Option<String> {
+    let props = std::fs::read_to_string(dir.join("gradle.properties")).ok()?;
+    for line in props.lines() {
+        let t = line.trim();
+        if t.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix(key) {
+            if let Some(v) = rest.trim_start().strip_prefix('=') {
+                let v = v.trim();
+                if !v.is_empty() {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Value of a Gradle `key = "value"` / `key 'value'` assignment (quotes stripped).
