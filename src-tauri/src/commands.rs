@@ -1828,68 +1828,62 @@ fn collect_tests(dir: &Path, out: &mut std::collections::BTreeSet<String>, depth
         let name = e.file_name();
         let name = name.to_string_lossy();
         if p.is_dir() {
-            if name == "target" || name == ".git" || name.starts_with('.') {
+            if matches!(name.as_ref(), "target" | "build" | "out" | "node_modules" | "bin") || name.starts_with('.') {
                 continue;
             }
             collect_tests(&p, out, depth + 1);
-        } else if p.extension().and_then(|s| s.to_str()) == Some("rs") {
+        } else if p.extension().and_then(|s| s.to_str()) == Some("java") {
             if let Ok(text) = std::fs::read_to_string(&p) {
-                scan_tests(&text, out);
+                scan_java_tests(&p, &text, out);
             }
         }
     }
 }
 
-fn scan_tests(text: &str, out: &mut std::collections::BTreeSet<String>) {
-    let mut pending = false;
-    for line in text.lines() {
-        let t = line.trim_start();
-        if let Some(rest) = t.strip_prefix("#[") {
-            if attr_is_test(rest) {
-                pending = true;
-                if let Some(n) = fn_name_after(t) {
-                    out.insert(n);
-                    pending = false;
-                }
+/// Add a Java file's test class (fully-qualified) and its `@Test` methods
+/// (`Class#method`) to `out`, when the file looks like a test.
+fn scan_java_tests(path: &Path, text: &str, out: &mut std::collections::BTreeSet<String>) {
+    let class = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if class.is_empty() {
+        return;
+    }
+    let has_anno = text.contains("@Test") || text.contains("@ParameterizedTest") || text.contains("@RepeatedTest") || text.contains("@TestFactory");
+    let name_looks_test = class.ends_with("Test") || class.ends_with("Tests") || class.ends_with("IT") || class.ends_with("TestCase");
+    if !has_anno && !name_looks_test {
+        return;
+    }
+    // Package → fully-qualified class name.
+    let package = text.lines().find_map(|l| {
+        let t = l.trim();
+        t.strip_prefix("package ").map(|p| p.trim().trim_end_matches(';').trim().to_string())
+    });
+    let fqn = match package {
+        Some(p) if !p.is_empty() => format!("{p}.{class}"),
+        _ => class.to_string(),
+    };
+    out.insert(fqn.clone());
+
+    // Each `@Test`-style method → `Class#method`. Heuristic: after the annotation,
+    // skip any `(...)` annotation args, then take the identifier before the next `(`.
+    for chunk in text.split("@Test").skip(1) {
+        let mut c = chunk.trim_start();
+        if c.starts_with('(') {
+            if let Some(rp) = c.find(')') {
+                c = c[rp + 1..].trim_start();
             }
-            continue;
         }
-        if !pending {
-            continue;
-        }
-        if t.is_empty() || t.starts_with("//") {
-            continue; // blank/comment between the attribute and the fn
-        }
-        if let Some(n) = fn_name_after(t) {
-            out.insert(n);
-            pending = false;
-        } else if !(t.starts_with("pub") || t.starts_with("async") || t.starts_with("unsafe") || t.starts_with("const") || t.starts_with("extern")) {
-            pending = false; // not a fn qualifier — give up on this attribute
+        let Some(paren) = c.find('(') else { continue };
+        let before = &c[..paren];
+        // The method name is the last identifier before `(`.
+        let method: String = before
+            .rsplit(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+            .find(|s| !s.is_empty())
+            .unwrap_or("")
+            .to_string();
+        if !method.is_empty() && method.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false) {
+            out.insert(format!("{fqn}#{method}"));
         }
     }
-}
-
-/// `rest` is the text right after `#[`. True when the attribute path ends in "test"
-/// (`test`, `tokio::test`, `rstest`), but not `cfg(test)`.
-fn attr_is_test(rest: &str) -> bool {
-    let end = rest.find([']', '(', ' ']).unwrap_or(rest.len());
-    rest[..end].trim().ends_with("test")
-}
-
-/// The identifier after the first standalone `fn ` on the line.
-fn fn_name_after(line: &str) -> Option<String> {
-    let idx = line.find("fn ")?;
-    if idx > 0 {
-        let prev = line.as_bytes()[idx - 1];
-        if prev != b' ' && prev != b'\t' {
-            return None; // part of a longer word
-        }
-    }
-    let name: String = line[idx + 3..]
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    (!name.is_empty()).then_some(name)
 }
 
 // --- Cargo ------------------------------------------------------------------
