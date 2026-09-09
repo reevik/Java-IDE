@@ -1,4 +1,5 @@
 mod cargo;
+mod codestyle;
 mod commands;
 mod dap;
 mod fs_tree;
@@ -388,6 +389,7 @@ pub fn run() {
             commands::chat_agent,
             commands::chat_cancel,
             commands::format_java,
+            commands::set_code_style,
             commands::lsp_completion,
             commands::lsp_hover,
             commands::lsp_definition,

@@ -23,6 +23,7 @@ import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
 import RunConfigDialog from "./components/RunConfigDialog";
 import SettingsDialog, { loadModel, loadToolchainDir } from "./components/SettingsDialog";
+import { loadCodeStyle } from "./lib/codeStyle";
 import {
   loadConfigs,
   saveConfigs,
@@ -66,6 +67,7 @@ import {
   gitBranch,
   detectSourceRoots,
   runMavenGoals,
+  setCodeStyle,
   lspClassFileContents,
   lspDidSave,
   lspSync,
@@ -204,6 +206,8 @@ export default function App() {
     if (m) void setModel(m);
     const tc = loadToolchainDir();
     if (tc) void setToolchainDir(tc);
+    const cs = loadCodeStyle();
+    void setCodeStyle(cs.kind, cs.path);
   }, []);
   // Test names for filter suggestions, fetched lazily while the dialog is open.
   const { data: testNames } = useQuery({
@@ -966,16 +970,16 @@ export default function App() {
     [qc, project?.path, closeTab],
   );
 
-  // Reformat the active Java file in place with google-java-format.
+  // Reformat the active Java file in place with the selected code style.
   const reformatActive = useCallback(async () => {
     const path = activeGroupRef.current === 1 ? secActiveRef.current : activeRef.current;
     const f = filesRef.current.find((x) => x.path === path);
     if (!f || f.loading || f.readOnly || !f.path.endsWith(".java")) return;
     try {
-      const formatted = await formatJava(f.content);
+      const formatted = await formatJava(f.content, projectRef.current ?? undefined, f.path);
       if (formatted && formatted !== f.content) activeEditor()?.setDoc(formatted);
     } catch (e) {
-      setLines((prev) => [...prev.slice(-4000), { stream: "stderr", text: `google-java-format: ${e}` }]);
+      setLines((prev) => [...prev.slice(-4000), { stream: "stderr", text: `Formatter: ${e}` }]);
       setOutputHidden(false);
       setOutputTab("output");
     }

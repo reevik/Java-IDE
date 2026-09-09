@@ -2525,16 +2525,17 @@ pub fn find_google_java_format() -> Option<String> {
 /// Format Java source with google-java-format, reading/writing via stdio so the
 /// editor buffer can be reformatted without touching disk. `edition` is accepted
 /// for signature compatibility but ignored (the formatter needs no language level).
-#[tauri::command]
-pub fn format_java(text: String, edition: Option<String>) -> Result<String, String> {
+/// Format via google-java-format reading stdin (`-`), optionally in AOSP style.
+fn google_java_format(text: &str, aosp: bool) -> Result<String, String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let _ = edition;
     let gjf = find_google_java_format()
         .ok_or("google-java-format not found. Install it with `brew install google-java-format`.")?;
-    // `-` reads the document from stdin and writes the formatted result to stdout;
-    // the JDK is taken from the IDE's effective PATH (honouring a selected JDK).
-    let mut child = Command::new(&gjf)
+    let mut cmd = Command::new(&gjf);
+    if aosp {
+        cmd.arg("--aosp");
+    }
+    let mut child = cmd
         .arg("-")
         .env("PATH", crate::toolchain::effective_path())
         .stdin(Stdio::piped())
@@ -2554,6 +2555,49 @@ pub fn format_java(text: String, edition: Option<String>) -> Result<String, Stri
     } else {
         let err = String::from_utf8_lossy(&out.stderr);
         Err(err.trim().trim_start_matches("error: ").to_string())
+    }
+}
+
+/// Set the active Java code style. `kind` is "google" | "aosp" | "eclipse";
+/// for "eclipse", `path` is the formatter `.xml` and `profile` an optional name.
+#[tauri::command]
+pub fn set_code_style(kind: String, path: Option<String>, profile: Option<String>) {
+    let style = match kind.as_str() {
+        "aosp" => crate::codestyle::Style::Aosp,
+        "eclipse" => crate::codestyle::Style::Eclipse { path: path.unwrap_or_default(), profile },
+        _ => crate::codestyle::Style::Google,
+    };
+    crate::codestyle::set(style);
+}
+
+/// Format Java source with the active code style. Google/AOSP go through
+/// google-java-format; an imported Eclipse profile goes through the JDT server.
+#[tauri::command]
+pub async fn format_java(
+    root: Option<String>,
+    path: Option<String>,
+    text: String,
+    app: tauri::AppHandle,
+    lsp: State<'_, LspState>,
+) -> Result<String, String> {
+    match crate::codestyle::get() {
+        crate::codestyle::Style::Google => {
+            tokio::task::spawn_blocking(move || google_java_format(&text, false)).await.map_err(|e| e.to_string())?
+        }
+        crate::codestyle::Style::Aosp => {
+            tokio::task::spawn_blocking(move || google_java_format(&text, true)).await.map_err(|e| e.to_string())?
+        }
+        crate::codestyle::Style::Eclipse { path: xml, profile } => {
+            let root = root.ok_or("no project open for Eclipse-profile formatting")?;
+            let path = path.ok_or("no file path for Eclipse-profile formatting")?;
+            let mut guard = lsp.0.lock().await;
+            let client = ensure_client(&mut guard, &app, &root).await?;
+            let url = if xml.starts_with("file://") { xml.clone() } else { format!("file://{xml}") };
+            client
+                .format_eclipse(&path, &text, &url, profile.as_deref())
+                .await
+                .map_err(|e| format!("Eclipse formatter: {e}"))
+        }
     }
 }
 

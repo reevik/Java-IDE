@@ -6,12 +6,21 @@ import {
   appVersion,
   detectedJdks,
   setLlmApiKey,
+  setCodeStyle,
   setModel,
   setToolchainDir,
   toolchainInfo,
   toolPaths,
   type ToolInfo,
 } from "../lib/api";
+import {
+  loadCodeStyle,
+  loadImportedProfiles,
+  saveCodeStyle,
+  saveImportedProfiles,
+  type ImportedProfile,
+  type StoredCodeStyle,
+} from "../lib/codeStyle";
 import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, loadMarginColumn, loadShowMargin, loadWrapAtMargin, saveAppearance, saveFont, saveMargin, type Appearance } from "../lib/theme";
 import { editorThemeOptions, loadEditorTheme, saveEditorTheme } from "../lib/editorThemes";
 
@@ -389,6 +398,8 @@ function JavaTab() {
         </p>
       </Section>
 
+      <CodeStyleSection />
+
       <Section title="Active">
         <Row label="Java version" value={info?.version ? info.version : "—"} />
         <Row label="Vendor" value={info?.vendor ?? "—"} />
@@ -396,6 +407,124 @@ function JavaTab() {
         <Row label="javac" value={info?.javac ?? "not found"} mono muted={!info?.javac} />
         <Row label="JAVA_HOME" value={info?.java_home ?? "—"} mono />
       </Section>
+    </div>
+  );
+}
+
+// --- Code style -------------------------------------------------------------
+
+const BUILTIN_STYLES: { kind: "google" | "aosp"; label: string; hint: string }[] = [
+  { kind: "google", label: "Google Java Style", hint: "google-java-format" },
+  { kind: "aosp", label: "AOSP (Android)", hint: "google-java-format --aosp" },
+];
+
+function CodeStyleSection() {
+  const [style, setStyle] = useState<StoredCodeStyle>(() => loadCodeStyle());
+  const [profiles, setProfiles] = useState<ImportedProfile[]>(() => loadImportedProfiles());
+  const [err, setErr] = useState<string | null>(null);
+
+  const applyStyle = (s: StoredCodeStyle) => {
+    setStyle(s);
+    saveCodeStyle(s);
+    void setCodeStyle(s.kind, s.path);
+  };
+
+  const importXml = async () => {
+    setErr(null);
+    const picked = await open({
+      multiple: false,
+      title: "Import an Eclipse formatter profile (.xml)",
+      filters: [{ name: "Eclipse formatter", extensions: ["xml"] }],
+    });
+    if (typeof picked !== "string") return;
+    const name = picked.split("/").pop() || picked;
+    const next = [...profiles.filter((p) => p.path !== picked), { name, path: picked }];
+    setProfiles(next);
+    saveImportedProfiles(next);
+    applyStyle({ kind: "eclipse", path: picked, name });
+  };
+
+  const removeProfile = (path: string) => {
+    const next = profiles.filter((p) => p.path !== path);
+    setProfiles(next);
+    saveImportedProfiles(next);
+    if (style.kind === "eclipse" && style.path === path) applyStyle({ kind: "google" });
+  };
+
+  const isActive = (kind: string, path?: string) =>
+    style.kind === kind && (kind !== "eclipse" || style.path === path);
+
+  return (
+    <Section title="Code style">
+      <div className="flex flex-col gap-1">
+        {BUILTIN_STYLES.map((s) => (
+          <StyleRow
+            key={s.kind}
+            active={isActive(s.kind)}
+            label={s.label}
+            hint={s.hint}
+            onSelect={() => applyStyle({ kind: s.kind })}
+          />
+        ))}
+        {profiles.map((p) => (
+          <StyleRow
+            key={p.path}
+            active={isActive("eclipse", p.path)}
+            label={p.name}
+            hint="Eclipse formatter profile"
+            onSelect={() => applyStyle({ kind: "eclipse", path: p.path, name: p.name })}
+            onRemove={() => removeProfile(p.path)}
+          />
+        ))}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button onClick={() => void importXml()} className="btn-bezel px-2.5 py-1.5 text-[12px]">Import formatter XML…</button>
+        {err && <span className="text-[11px] text-[var(--danger,#c22)]">{err}</span>}
+      </div>
+      <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+        Google/AOSP use <code className="font-mono">google-java-format</code>; an imported Eclipse formatter
+        profile (<code className="font-mono">.xml</code>) is applied via the language server. Reformat with{" "}
+        <kbd className="rounded bg-[var(--surface-2)] px-1">⌘⌥L</kbd>.
+      </p>
+    </Section>
+  );
+}
+
+function StyleRow({
+  active,
+  label,
+  hint,
+  onSelect,
+  onRemove,
+}: {
+  active: boolean;
+  label: string;
+  hint: string;
+  onSelect: () => void;
+  onRemove?: () => void;
+}) {
+  return (
+    <div
+      className={`group flex items-center gap-2 rounded-md border px-2.5 py-1.5 ${
+        active ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[color:var(--line)] hover:bg-[var(--hover)]"
+      }`}
+    >
+      <button onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+        <span className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border ${active ? "border-[var(--accent)]" : "border-[var(--text-tertiary)]"}`}>
+          {active && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
+        </span>
+        <span className="min-w-0 truncate text-[12.5px] text-[var(--text-primary)]">{label}</span>
+        <span className="ml-auto shrink-0 font-mono text-[10.5px] text-[var(--text-tertiary)]">{hint}</span>
+      </button>
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          title="Remove this profile"
+          className="shrink-0 rounded p-0.5 text-[var(--text-tertiary)] opacity-0 hover:text-red-600 group-hover:opacity-100"
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      )}
     </div>
   );
 }

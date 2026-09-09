@@ -383,9 +383,16 @@ export function fixError(error: string, code: string): Promise<string> {
   return invoke("fix_error", { error, code });
 }
 
-/** Format Java source with google-java-format; returns the formatted text. */
-export function formatJava(text: string): Promise<string> {
-  return invoke("format_java", { text, edition: null });
+/** Format Java source with the active code style; returns the formatted text.
+ *  `root`/`path` are needed only for an imported Eclipse profile (JDT formatter). */
+export function formatJava(text: string, root?: string, path?: string): Promise<string> {
+  return invoke("format_java", { text, root: root ?? null, path: path ?? null });
+}
+
+export type CodeStyleKind = "google" | "aosp" | "eclipse";
+/** Set the active Java code style (persisted by the frontend, re-applied on startup). */
+export function setCodeStyle(kind: CodeStyleKind, path?: string, profile?: string): Promise<void> {
+  return invoke("set_code_style", { kind, path: path ?? null, profile: profile ?? null });
 }
 
 export interface ChatMsg {

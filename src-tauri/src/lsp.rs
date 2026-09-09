@@ -776,6 +776,45 @@ impl LspClient {
         Ok(resp.get("result").and_then(first_location))
     }
 
+    /// Format `text` with JDT.LS's Eclipse formatter using the profile at
+    /// `settings_url` (an Eclipse formatter `.xml`), returning the formatted text.
+    /// `profile` selects a named profile in the file (None → the first).
+    pub async fn format_eclipse(
+        &self,
+        path: &str,
+        text: &str,
+        settings_url: &str,
+        profile: Option<&str>,
+    ) -> Result<String> {
+        // Point the JDT formatter at the profile.
+        let mut fmt = json!({ "url": settings_url });
+        if let Some(p) = profile.filter(|s| !s.is_empty()) {
+            fmt["profile"] = json!(p);
+        }
+        self.notify(
+            "workspace/didChangeConfiguration",
+            json!({ "settings": { "java": { "format": { "enabled": true, "settings": fmt } } } }),
+        )
+        .await?;
+        self.sync(path, text).await?;
+        let resp = self
+            .request(
+                "textDocument/formatting",
+                json!({
+                    "textDocument": { "uri": uri_of(path) },
+                    "options": { "tabSize": 4, "insertSpaces": true }
+                }),
+                Duration::from_secs(20),
+            )
+            .await?;
+        if let Some(err) = resp.get("error") {
+            let msg = err.get("message").and_then(Value::as_str).unwrap_or("formatting failed");
+            anyhow::bail!("{msg}");
+        }
+        let edits = resp.get("result").and_then(Value::as_array).cloned().unwrap_or_default();
+        Ok(apply_text_edits(text, &edits))
+    }
+
     /// Fetch the source of a `jdt://` class-file URI (JDT.LS's decompiled or
     /// source-attached view of a library class) as plain text.
     pub async fn class_file_contents(&self, uri: &str) -> Result<String> {
@@ -1130,6 +1169,53 @@ fn push_text_edit(te: &Value, out: &mut Vec<TextEditItem>) {
 
 /// First target from a definition result: `Location`, `Location[]`, or
 /// `LocationLink[]`. Returns (absolute path, 0-based line, 0-based character).
+/// Apply LSP `TextEdit`s to `text`, returning the result. Edits are applied from
+/// the end backwards so earlier offsets stay valid. Positions are line/character
+/// (UTF-16 in the spec; treated as chars here, fine for typical Java source).
+fn apply_text_edits(text: &str, edits: &[Value]) -> String {
+    // Byte offset of the start of each line.
+    let mut line_starts = vec![0usize];
+    for (i, b) in text.bytes().enumerate() {
+        if b == b'\n' {
+            line_starts.push(i + 1);
+        }
+    }
+    let offset = |line: usize, ch: usize| -> usize {
+        let base = *line_starts.get(line).unwrap_or(&text.len());
+        // Advance `ch` UTF-16 code units from the line start, clamped to line end.
+        let line_end = line_starts.get(line + 1).copied().unwrap_or(text.len());
+        let slice = &text[base..line_end];
+        let mut units = 0usize;
+        for (i, c) in slice.char_indices() {
+            if units >= ch {
+                return base + i;
+            }
+            units += c.len_utf16();
+        }
+        line_end
+    };
+
+    // Collect (start_byte, end_byte, new_text), then apply last-first.
+    let mut spans: Vec<(usize, usize, String)> = Vec::new();
+    for e in edits {
+        let (Some(range), Some(nt)) = (e.get("range"), e.get("newText").and_then(Value::as_str)) else {
+            continue;
+        };
+        let g = |k1: &str, k2: &str| range.get(k1).and_then(|p| p.get(k2)).and_then(Value::as_u64).unwrap_or(0) as usize;
+        let start = offset(g("start", "line"), g("start", "character"));
+        let end = offset(g("end", "line"), g("end", "character"));
+        if start <= end && end <= text.len() {
+            spans.push((start, end, nt.to_string()));
+        }
+    }
+    spans.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut out = text.to_string();
+    for (start, end, nt) in spans {
+        out.replace_range(start..end, &nt);
+    }
+    out
+}
+
 fn first_location(result: &Value) -> Option<(String, u32, u32)> {
     let pick = |v: &Value| -> Option<(String, u32, u32)> {
         let uri = v
