@@ -43,8 +43,11 @@ import { xml } from "@codemirror/lang-xml";
 import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
 import { properties } from "@codemirror/legacy-modes/mode/properties";
+import { groovy } from "@codemirror/legacy-modes/mode/groovy";
+import { kotlin } from "@codemirror/legacy-modes/mode/clike";
 import {
   autocompletion,
+  completeAnyWord,
   completionKeymap,
   snippet,
   type CompletionContext,
@@ -578,6 +581,51 @@ const xmlInlineDiagPlugin = ViewPlugin.fromClass(
   },
   { decorations: (v) => v.decorations },
 );
+
+// --- Gradle (build.gradle[.kts]) ---------------------------------------------
+
+/** Common Gradle DSL terms for build-script completion (not a full language
+ *  server — a curated keyword/config list plus buffer words). */
+const GRADLE_TERMS = [
+  "plugins", "id", "apply", "from", "buildscript", "classpath",
+  "repositories", "mavenCentral", "mavenLocal", "google", "gradlePluginPortal", "maven", "url", "ivy",
+  "dependencies", "implementation", "api", "compileOnly", "runtimeOnly", "annotationProcessor",
+  "testImplementation", "testRuntimeOnly", "testCompileOnly", "developmentOnly", "constraints",
+  "platform", "enforcedPlatform", "project", "files", "exclude", "group", "module", "transitive",
+  "configurations", "extendsFrom", "resolutionStrategy", "force",
+  "group", "version", "description", "ext", "extra", "rootProject", "subprojects", "allprojects",
+  "java", "sourceCompatibility", "targetCompatibility", "toolchain", "languageVersion",
+  "JavaLanguageVersion", "JavaVersion", "vendor", "modularity", "withSourcesJar", "withJavadocJar",
+  "sourceSets", "main", "test", "srcDir", "srcDirs", "resources", "output",
+  "tasks", "register", "named", "withType", "create", "getByName", "matching", "configureEach",
+  "useJUnitPlatform", "useJUnit", "testLogging", "events", "maxParallelForks",
+  "jar", "war", "manifest", "attributes", "archiveBaseName", "archiveVersion", "duplicatesStrategy",
+  "application", "mainClass", "mainModule", "applicationDefaultJvmArgs",
+  "compileJava", "options", "encoding", "compilerArgs", "release", "dependsOn", "mustRunAfter",
+  "doFirst", "doLast", "finalizedBy", "onlyIf", "inputs", "outputs",
+  "into", "include", "rename", "expand", "filter", "eachFile", "duplicatesStrategy",
+  "provider", "providers", "gradleProperty", "environmentVariable", "layout", "buildDirectory",
+];
+
+/** Completion for Gradle scripts: DSL terms + words already in the buffer. */
+function gradleCompletion(ctx: CompletionContext): CompletionResult | null {
+  const word = ctx.matchBefore(/[\w.]+/);
+  if (!word || (word.from === word.to && !ctx.explicit)) return null;
+  return {
+    from: word.from,
+    options: GRADLE_TERMS.map((label) => ({ label, type: "keyword" })),
+    validFor: /^[\w.]*$/,
+  };
+}
+
+/** True for a Groovy-DSL Gradle/Groovy file (not the Kotlin `.kts` variant). */
+function isGroovyGradle(path: string): boolean {
+  return (path.endsWith(".gradle") || path.endsWith(".groovy")) && !path.endsWith(".gradle.kts");
+}
+/** True for a Kotlin-DSL Gradle / Kotlin file. */
+function isKotlinGradle(path: string): boolean {
+  return path.endsWith(".gradle.kts") || path.endsWith(".kts") || path.endsWith(".kt");
+}
 
 // --- Java .properties: highlighting + validation ----------------------------
 
@@ -1678,6 +1726,14 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         // JSON: highlighting + object/array folding + parse-error location.
         ...(path.endsWith(".json") ? [json(), jsonLinter, jsonInlineDiagPlugin] : []),
         ...(path.endsWith(".toml") ? [StreamLanguage.define(toml)] : []),
+        // Gradle: Groovy DSL (build.gradle / settings.gradle) or Kotlin DSL
+        // (*.gradle.kts), with DSL + buffer-word completion.
+        ...(isGroovyGradle(path)
+          ? [StreamLanguage.define(groovy), autocompletion({ override: [gradleCompletion, completeAnyWord], activateOnTyping: true, icons: true })]
+          : []),
+        ...(isKotlinGradle(path)
+          ? [StreamLanguage.define(kotlin), autocompletion({ override: [gradleCompletion, completeAnyWord], activateOnTyping: true, icons: true })]
+          : []),
         themeComp.current.of(editorThemeExtensions()),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
