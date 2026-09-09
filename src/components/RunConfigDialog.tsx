@@ -133,13 +133,9 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
                 </Field>
 
                 <Field label="Type">
-                  <div className="flex flex-wrap gap-1">
-                    {TYPES.map((t) => (
-                      <Seg key={t.type} active={sel.type === t.type} onClick={() => update({ type: t.type })}>
-                        <KindIcon type={t.type} />
-                        {t.label}
-                      </Seg>
-                    ))}
+                  <div className="flex items-center gap-1.5 text-[12.5px] text-[var(--text-secondary)]">
+                    <KindIcon type={sel.type} />
+                    {TYPES.find((t) => t.type === sel.type)?.label ?? sel.type}
                   </div>
                 </Field>
 
@@ -265,19 +261,6 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {children}
       {hint && <span className="text-[11px] text-[var(--text-tertiary)]">{hint}</span>}
     </label>
-  );
-}
-
-function Seg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium ${
-        active ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "bg-[var(--surface-2)] text-[var(--text-secondary)] hover:bg-[var(--hover)]"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
