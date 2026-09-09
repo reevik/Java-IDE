@@ -95,6 +95,22 @@ class HrWidget extends WidgetType {
 }
 
 /** A rendered raw-HTML block (e.g. an HTML `<table>`). Click to edit the source. */
+/** An inline rendered Markdown image (`![alt](url)`), incl. remote badges. */
+class ImageWidget extends WidgetType {
+  constructor(readonly url: string, readonly alt: string, readonly basePath?: string) { super(); }
+  eq(o: ImageWidget) { return o.url === this.url && o.alt === this.alt && o.basePath === this.basePath; }
+  toDOM() {
+    const img = document.createElement("img");
+    img.src = resolveAsset(this.basePath, this.url);
+    img.alt = this.alt;
+    img.className = "md-img";
+    img.style.maxWidth = "100%";
+    img.style.verticalAlign = "text-bottom";
+    return img;
+  }
+  ignoreEvent() { return false; }
+}
+
 class HtmlWidget extends WidgetType {
   constructor(readonly html: string, readonly basePath?: string) { super(); }
   eq(o: HtmlWidget) { return o.html === this.html && o.basePath === this.basePath; }
@@ -123,7 +139,7 @@ class HtmlWidget extends WidgetType {
 
 /** Obsidian-style inline rendering: hide markdown markers, style content, and
  *  reveal the raw source wherever the selection is. */
-function buildDecorations(view: EditorView): DecorationSet {
+function buildDecorations(view: EditorView, basePath?: string): DecorationSet {
   const deco: Range<Decoration>[] = [];
   const { doc } = view.state;
   const sel = view.state.selection;
@@ -158,6 +174,14 @@ function buildDecorations(view: EditorView): DecorationSet {
               if (last.length) deco.push(Decoration.replace({}).range(last.from, last.to));
             }
           }
+        } else if (name === "Image") {
+          if (editing(node.from, node.to)) return false;
+          const raw = doc.sliceString(node.from, node.to);
+          const m = /^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)$/.exec(raw);
+          if (m) {
+            deco.push(Decoration.replace({ widget: new ImageWidget(m[2], m[1], basePath) }).range(node.from, node.to));
+          }
+          return false; // don't descend into the image's marks
         } else if (name === "InlineCode") {
           deco.push(Decoration.mark({ class: "cm-inline-code" }).range(node.from, node.to));
         } else if (name === "ListMark") {
@@ -182,16 +206,16 @@ function buildDecorations(view: EditorView): DecorationSet {
   return Decoration.set(deco, true);
 }
 
-function livePreview(): Extension {
+function livePreview(basePath?: string): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
       constructor(view: EditorView) {
-        this.decorations = buildDecorations(view);
+        this.decorations = buildDecorations(view, basePath);
       }
       update(u: ViewUpdate) {
         if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged) {
-          this.decorations = buildDecorations(u.view);
+          this.decorations = buildDecorations(u.view, basePath);
         }
       }
     },
@@ -259,7 +283,7 @@ export default function MarkdownEditor({ initial, onChange, onSave, onCursor, re
           markdown({ base: markdownLanguage }),
           syntaxHighlighting(mdHighlight),
           EditorView.lineWrapping,
-          livePreview(),
+          livePreview(basePath),
           makeBlockDecoField(basePath),
           search({ top: true, createPanel: (v) => new QuickSearchPanel(v) }),
           keymap.of([
