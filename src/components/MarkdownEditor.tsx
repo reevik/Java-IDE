@@ -13,6 +13,7 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { QuickSearchPanel } from "./QuickSearchPanel";
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -24,6 +25,26 @@ interface Props {
   onSave: () => void;
   onCursor?: (line: number, col: number) => void;
   readOnly?: boolean;
+  /** Directory of the file, for resolving relative `<img src>` in HTML blocks. */
+  basePath?: string;
+}
+
+/** Resolve a possibly-relative asset `src` to a webview-loadable URL. Absolute
+ *  URLs / data URIs pass through; a relative path is resolved against `base` and
+ *  converted to Tauri's asset:// URL. */
+function resolveAsset(base: string | undefined, src: string): string {
+  if (!src || /^[a-z]+:/i.test(src) || src.startsWith("//") || src.startsWith("/") || !base) return src;
+  const parts = `${base}/${src.replace(/^\.\//, "")}`.split("/");
+  const out: string[] = [];
+  for (const p of parts) {
+    if (p === "..") out.pop();
+    else if (p !== "." && p !== "") out.push(p);
+  }
+  try {
+    return convertFileSrc("/" + out.join("/"));
+  } catch {
+    return src;
+  }
 }
 
 const mdHighlight = HighlightStyle.define([
@@ -75,12 +96,18 @@ class HrWidget extends WidgetType {
 
 /** A rendered raw-HTML block (e.g. an HTML `<table>`). Click to edit the source. */
 class HtmlWidget extends WidgetType {
-  constructor(readonly html: string) { super(); }
-  eq(o: HtmlWidget) { return o.html === this.html; }
+  constructor(readonly html: string, readonly basePath?: string) { super(); }
+  eq(o: HtmlWidget) { return o.html === this.html && o.basePath === this.basePath; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "md-html md-preview";
     wrap.innerHTML = this.html;
+    // Resolve relative image sources against the file's directory so local
+    // images (e.g. a README logo) load in the webview.
+    wrap.querySelectorAll("img").forEach((img) => {
+      const raw = img.getAttribute("src");
+      if (raw) img.setAttribute("src", resolveAsset(this.basePath, raw));
+    });
     // Click (outside a link) reveals the raw source for editing.
     wrap.addEventListener("mousedown", (e) => {
       if ((e.target as HTMLElement).closest("a")) return;
@@ -174,11 +201,13 @@ function livePreview(): Extension {
 
 /** Block widgets (HR, raw-HTML blocks) — these MUST be provided by a StateField,
  *  not a ViewPlugin (CodeMirror forbids block decorations from plugins). */
-function buildBlockDecos(state: EditorState): DecorationSet {
+function buildBlockDecos(state: EditorState, basePath?: string): DecorationSet {
   const deco: Range<Decoration>[] = [];
   const { doc } = state;
   const sel = state.selection;
-  const editing = (from: number, to: number) => sel.ranges.some((r) => r.from <= to && r.to >= from);
+  // Reveal the raw source only when the caret is *strictly inside* the block, so
+  // a block that starts at the very top (caret at 0 on open) still renders.
+  const editing = (from: number, to: number) => sel.ranges.some((r) => r.to > from && r.from < to);
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name === "HorizontalRule") {
@@ -187,7 +216,7 @@ function buildBlockDecos(state: EditorState): DecorationSet {
         }
       } else if (node.name === "HTMLBlock") {
         if (!editing(node.from, node.to)) {
-          deco.push(Decoration.replace({ widget: new HtmlWidget(doc.sliceString(node.from, node.to)), block: true }).range(node.from, node.to));
+          deco.push(Decoration.replace({ widget: new HtmlWidget(doc.sliceString(node.from, node.to), basePath), block: true }).range(node.from, node.to));
         }
       }
     },
@@ -195,18 +224,20 @@ function buildBlockDecos(state: EditorState): DecorationSet {
   return Decoration.set(deco, true);
 }
 
-const blockDecoField = StateField.define<DecorationSet>({
-  create: (state) => buildBlockDecos(state),
-  update(value, tr) {
-    if (tr.docChanged || tr.selection) return buildBlockDecos(tr.state);
-    return value;
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
+function makeBlockDecoField(basePath?: string) {
+  return StateField.define<DecorationSet>({
+    create: (state) => buildBlockDecos(state, basePath),
+    update(value, tr) {
+      if (tr.docChanged || tr.selection) return buildBlockDecos(tr.state, basePath);
+      return value;
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
+}
 
 /** A single-view Markdown editor with Obsidian-style Live Preview — you edit
  *  inline the moment you open the file. App remounts it per file via `key`. */
-export default function MarkdownEditor({ initial, onChange, onSave, onCursor, readOnly }: Props) {
+export default function MarkdownEditor({ initial, onChange, onSave, onCursor, readOnly, basePath }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -229,7 +260,7 @@ export default function MarkdownEditor({ initial, onChange, onSave, onCursor, re
           syntaxHighlighting(mdHighlight),
           EditorView.lineWrapping,
           livePreview(),
-          blockDecoField,
+          makeBlockDecoField(basePath),
           search({ top: true, createPanel: (v) => new QuickSearchPanel(v) }),
           keymap.of([
             { key: "Mod-s", preventDefault: true, run: () => { onSaveRef.current(); return true; } },

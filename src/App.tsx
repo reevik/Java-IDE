@@ -1514,6 +1514,7 @@ export default function App() {
         <MarkdownEditor
           key={`md:${f.path}#${f.rev}`}
           initial={f.content}
+          basePath={f.path.slice(0, f.path.lastIndexOf("/"))}
           onChange={(text) => onEdit(f.path, text)}
           onSave={() => void saveNow(f.path)}
           onCursor={(line, col) => setCursor({ line, col })}
