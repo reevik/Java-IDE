@@ -32,6 +32,8 @@ import {
   saveSelectedId,
   defaultConfigs,
   toCargo,
+  goalsFor,
+  isGoalConfig,
   newId,
   type RunConfig,
 } from "./lib/runConfigs";
@@ -866,7 +868,7 @@ export default function App() {
 
   /** Run raw Maven goals (from the Maven panel), streaming to the Output panel. */
   const runGoal = useCallback(
-    async (goals: string[]) => {
+    async (goals: string[], env: Record<string, string> = {}) => {
       if (!project || goals.length === 0) return;
       await Promise.all(filesRef.current.filter((f) => f.saveState !== "saved").map((f) => saveNow(f.path)));
       setLines([]);
@@ -877,7 +879,7 @@ export default function App() {
       setOutputHidden(false);
       setOutputTab("output");
       try {
-        await runMavenGoals(project.path, goals);
+        await runMavenGoals(project.path, goals, env);
       } catch (e) {
         setLines((prev) => [...prev, { stream: "stderr", text: String(e) }]);
         setRunning(false);
@@ -886,38 +888,46 @@ export default function App() {
     [project, saveNow],
   );
 
+  /** Run any run configuration — routing by type (goals vs run/test). */
+  const runConfig = useCallback(
+    (c: RunConfig) => {
+      setOutputTab("output");
+      if (isGoalConfig(c)) {
+        void runGoal(goalsFor(c), c.env);
+      } else {
+        const { command, extra, env } = toCargo(c);
+        void runCargo(command, extra, env);
+      }
+    },
+    [runCargo, runGoal],
+  );
+
   /** Run the currently-selected run configuration. */
   const runSelectedConfig = useCallback(() => {
-    if (!selectedConfig) return;
-    const { command, extra, env } = toCargo(selectedConfig);
-    setOutputTab("output");
-    void runCargo(command, extra, env);
-  }, [selectedConfig, runCargo]);
+    if (selectedConfig) runConfig(selectedConfig);
+  }, [selectedConfig, runConfig]);
 
   /** Click a ▶ gutter marker: create (or reuse) a run config named after the
-   *  function, select it, and run it — IntelliJ style. */
+   *  symbol, select it, and run it — IntelliJ style. */
   const runSymbol = useCallback(
     (run: Runnable, _filePath: string) => {
       if (!project) return;
       // `run.name` is the class (main) or the test class/method the gutter detected.
       const cfg: RunConfig =
         run.kind === "test"
-          ? { id: newId(), name: run.name, kind: "test", testFilter: run.name, args: [], env: {} }
-          : { id: newId(), name: run.name, kind: "run", mainClass: run.name, args: [], env: {} };
+          ? { id: newId(), name: run.name, type: "junit", testTarget: run.name, args: [], env: {} }
+          : { id: newId(), name: run.name, type: "application", mainClass: run.name, args: [], env: {} };
 
       // Reuse an identical existing config so repeated clicks don't pile up.
       const existing = runConfigs.find((c) =>
-        c.kind === cfg.kind && c.name === cfg.name && (cfg.kind === "test" ? c.testFilter === cfg.testFilter : c.mainClass === cfg.mainClass),
+        c.type === cfg.type && c.name === cfg.name && (cfg.type === "junit" ? c.testTarget === cfg.testTarget : c.mainClass === cfg.mainClass),
       );
       const chosen = existing ?? cfg;
       if (!existing) persistConfigs([...runConfigs, cfg]);
       selectConfig(chosen.id);
-
-      const { command, extra, env } = toCargo(chosen);
-      setOutputTab("output");
-      void runCargo(command, extra, env);
+      runConfig(chosen);
     },
-    [project, runConfigs, persistConfigs, selectConfig, runCargo],
+    [project, runConfigs, persistConfigs, selectConfig, runConfig],
   );
 
   /** Diagnostics carry project-relative paths; resolve then jump. */
@@ -1313,10 +1323,17 @@ export default function App() {
       return;
     }
     if (!selectedConfig) return;
-    const target: { kind: "bin" | "test"; name: string | null } =
-      selectedConfig.kind === "test"
-        ? { kind: "test", name: selectedConfig.testFilter?.trim() || null }
-        : { kind: "bin", name: selectedConfig.mainClass?.trim() || info?.bins?.[0] || null };
+    // Only Java Application configs launch under the debugger.
+    if (selectedConfig.type !== "application") {
+      setOutputHidden(false);
+      setOutputTab("debugger");
+      setDebugConsole([`Debugging isn't supported for a ${selectedConfig.type} configuration — use a Java Application configuration.`]);
+      return;
+    }
+    const target: { kind: "bin" | "test"; name: string | null } = {
+      kind: "bin",
+      name: selectedConfig.mainClass?.trim() || info?.bins?.[0] || null,
+    };
     setDebugTarget(target);
     await launchDebug(target);
   }, [project, selectedConfig, info, launchDebug]);

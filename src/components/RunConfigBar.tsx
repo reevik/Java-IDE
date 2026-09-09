@@ -29,7 +29,7 @@ export default function RunConfigBar({ configs, selected, running, debugBusy, de
           title="Select run configuration"
           className="flex min-w-0 max-w-[190px] items-center gap-1.5 px-2 py-1 hover:bg-[var(--hover)]"
         >
-          {selected ? <KindIcon kind={selected.kind} /> : null}
+          {selected ? <KindIcon type={selected.type} /> : null}
           <span className="min-w-0 truncate text-[12px] font-medium text-[var(--text-primary)]">
             {selected?.name ?? "No configurations"}
           </span>
@@ -72,7 +72,7 @@ export default function RunConfigBar({ configs, selected, running, debugBusy, de
                   onClick={() => { onSelect(c.id); setOpen(false); }}
                   className="project-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left"
                 >
-                  <KindIcon kind={c.kind} />
+                  <KindIcon type={c.type} />
                   <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{c.name || "(unnamed)"}</span>
                   {selected?.id === c.id && <Dot />}
                 </button>

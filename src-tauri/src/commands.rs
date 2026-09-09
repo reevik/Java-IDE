@@ -1916,12 +1916,13 @@ pub async fn cargo_run(
 pub async fn run_maven_goals(
     dir: String,
     goals: Vec<String>,
+    env: Option<std::collections::HashMap<String, String>>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<i32, String> {
     let d = PathBuf::from(&dir);
     ensure_within_projects(&d, &state)?;
-    cargo::run_goals(app, &d, goals, std::collections::HashMap::new())
+    cargo::run_goals(app, &d, goals, env.unwrap_or_default())
         .await
         .map_err(|e| e.to_string())
 }

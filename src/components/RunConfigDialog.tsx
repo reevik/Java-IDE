@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 import {
-  newId,
+  newConfig,
   parseArgs,
   parseEnv,
   serializeArgs,
   serializeEnv,
   type RunConfig,
+  type RunType,
 } from "../lib/runConfigs";
+import { GradleLogo, MavenLogo } from "./BuildView";
+
+const TYPES: { type: RunType; label: string }[] = [
+  { type: "application", label: "Java Application" },
+  { type: "maven", label: "Maven" },
+  { type: "gradle", label: "Gradle" },
+  { type: "junit", label: "JUnit" },
+];
 
 interface Props {
   configs: RunConfig[];
@@ -30,13 +39,16 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
     setEnvText(sel ? serializeEnv(sel.env) : "");
   }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [addOpen, setAddOpen] = useState(false);
+
   const update = (patch: Partial<RunConfig>) =>
     setDraft((prev) => prev.map((c) => (c.id === selId ? { ...c, ...patch } : c)));
 
-  const add = () => {
-    const c: RunConfig = { id: newId(), name: "New configuration", kind: "run", mainClass: "", args: [], env: {} };
+  const add = (type: RunType) => {
+    const c = newConfig(type);
     setDraft((prev) => [...prev, c]);
     setSelId(c.id);
+    setAddOpen(false);
   };
   const remove = (id: string) => {
     setDraft((prev) => {
@@ -68,7 +80,7 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
                     c.id === selId ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "hover:bg-[var(--hover)]"
                   }`}
                 >
-                  <KindIcon kind={c.kind} />
+                  <KindIcon type={c.type} />
                   <span className="min-w-0 flex-1 truncate">{c.name || "(unnamed)"}</span>
                   <span
                     role="button"
@@ -84,9 +96,28 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
                 <p className="px-3 py-4 text-center text-[11.5px] text-[var(--text-tertiary)]">No configurations.</p>
               )}
             </div>
-            <button onClick={add} className="shrink-0 border-t border-[color:var(--line)] px-3 py-2 text-left text-[12px] text-[var(--accent-strong)] hover:bg-[var(--hover)]">
-              + Add configuration
-            </button>
+            <div className="relative shrink-0 border-t border-[color:var(--line)]">
+              <button onClick={() => setAddOpen((v) => !v)} className="w-full px-3 py-2 text-left text-[12px] text-[var(--accent-strong)] hover:bg-[var(--hover)]">
+                + Add configuration
+              </button>
+              {addOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setAddOpen(false)} />
+                  <div className="project-menu absolute bottom-full left-2 z-50 mb-1 w-52 rounded-lg py-1">
+                    {TYPES.map((t) => (
+                      <button
+                        key={t.type}
+                        onClick={() => add(t.type)}
+                        className="project-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)]"
+                      >
+                        <KindIcon type={t.type} />
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {/* form */}
@@ -102,39 +133,71 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
                 </Field>
 
                 <Field label="Type">
-                  <div className="flex gap-1">
-                    <Seg active={sel.kind === "run"} onClick={() => update({ kind: "run" })}>Run</Seg>
-                    <Seg active={sel.kind === "test"} onClick={() => update({ kind: "test" })}>Test</Seg>
+                  <div className="flex flex-wrap gap-1">
+                    {TYPES.map((t) => (
+                      <Seg key={t.type} active={sel.type === t.type} onClick={() => update({ type: t.type })}>
+                        <KindIcon type={t.type} />
+                        {t.label}
+                      </Seg>
+                    ))}
                   </div>
                 </Field>
 
-                {sel.kind === "run" ? (
-                  <Field label="Main class" hint="Fully-qualified, e.g. com.example.Main. Empty uses the project's configured main.">
+                {sel.type === "application" && (
+                  <>
+                    <Field label="Main class" hint="Fully-qualified, e.g. com.example.Main. Empty uses the project's configured main.">
+                      <input
+                        value={sel.mainClass ?? ""}
+                        onChange={(e) => update({ mainClass: e.target.value || undefined })}
+                        placeholder="com.example.Main"
+                        spellCheck={false}
+                        className="field w-full px-2 py-1.5 font-mono text-[12px]"
+                      />
+                    </Field>
+                    <Field label="Program arguments" hint="Passed to the program. Quote args with spaces.">
+                      <input
+                        value={argsText}
+                        onChange={(e) => { setArgsText(e.target.value); update({ args: parseArgs(e.target.value) }); }}
+                        placeholder="--verbose input.txt"
+                        className="field w-full px-2 py-1.5 font-mono text-[12px]"
+                      />
+                    </Field>
+                  </>
+                )}
+
+                {(sel.type === "maven" || sel.type === "gradle") && (
+                  <Field
+                    label={sel.type === "maven" ? "Goals" : "Tasks"}
+                    hint={sel.type === "maven" ? "Space-separated, e.g. clean install -DskipTests" : "Space-separated, e.g. clean build test"}
+                  >
                     <input
-                      value={sel.mainClass ?? ""}
-                      onChange={(e) => update({ mainClass: e.target.value || undefined })}
-                      placeholder="com.example.Main"
+                      value={sel.goals ?? ""}
+                      onChange={(e) => update({ goals: e.target.value })}
+                      placeholder={sel.type === "maven" ? "clean install" : "build"}
                       spellCheck={false}
                       className="field w-full px-2 py-1.5 font-mono text-[12px]"
                     />
                   </Field>
-                ) : (
-                  <Field label="Test filter" hint="Empty runs all tests. Otherwise Class or Class#method, e.g. FooTest or FooTest#works.">
-                    <TestFilterInput
-                      value={sel.testFilter ?? ""}
-                      onChange={(v) => update({ testFilter: v })}
-                      suggestions={tests}
+                )}
+
+                {sel.type === "maven" && (
+                  <Field label="Profiles" hint="Comma-separated Maven profiles, activated with -P (e.g. desktop,ci).">
+                    <input
+                      value={sel.profiles ?? ""}
+                      onChange={(e) => update({ profiles: e.target.value })}
+                      placeholder="(none)"
+                      spellCheck={false}
+                      className="field w-full px-2 py-1.5 font-mono text-[12px]"
                     />
                   </Field>
                 )}
 
-                {sel.kind === "run" && (
-                  <Field label="Program arguments" hint="Passed to the program. Quote args with spaces.">
-                    <input
-                      value={argsText}
-                      onChange={(e) => { setArgsText(e.target.value); update({ args: parseArgs(e.target.value) }); }}
-                      placeholder="--verbose input.txt"
-                      className="field w-full px-2 py-1.5 font-mono text-[12px]"
+                {sel.type === "junit" && (
+                  <Field label="Test filter" hint="Empty runs all tests. Otherwise Class or Class#method, e.g. FooTest or FooTest#works.">
+                    <TestFilterInput
+                      value={sel.testTarget ?? ""}
+                      onChange={(v) => update({ testTarget: v })}
+                      suggestions={tests}
                     />
                   </Field>
                 )}
@@ -209,7 +272,7 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
   return (
     <button
       onClick={onClick}
-      className={`rounded-md px-3 py-1 text-[12px] font-medium ${
+      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium ${
         active ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "bg-[var(--surface-2)] text-[var(--text-secondary)] hover:bg-[var(--hover)]"
       }`}
     >
@@ -218,16 +281,25 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
   );
 }
 
-export function KindIcon({ kind }: { kind: "run" | "test" }) {
-  return kind === "run" ? (
-    <svg viewBox="0 0 24 24" width="12" height="12" className="shrink-0 text-green-600" fill="currentColor">
-      <path d="M7 4l12 8-12 8z" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" width="13" height="13" className="shrink-0 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 3h6M10 3v5l-4 9a2 2 0 0 0 2 3h8a2 2 0 0 0 2-3l-4-9V3" />
-    </svg>
-  );
+export function KindIcon({ type }: { type: RunType }) {
+  switch (type) {
+    case "maven":
+      return <MavenLogo size={13} className="text-[#C71A36]" />;
+    case "gradle":
+      return <GradleLogo size={14} className="text-[#0d9488]" />;
+    case "junit":
+      return (
+        <svg viewBox="0 0 24 24" width="13" height="13" className="shrink-0 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 3h6M10 3v5l-4 9a2 2 0 0 0 2 3h8a2 2 0 0 0 2-3l-4-9V3" />
+        </svg>
+      );
+    default: // application
+      return (
+        <svg viewBox="0 0 24 24" width="12" height="12" className="shrink-0 text-green-600" fill="currentColor">
+          <path d="M7 4l12 8-12 8z" />
+        </svg>
+      );
+  }
 }
 
 function TrashIcon() {

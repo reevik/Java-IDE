@@ -1,19 +1,32 @@
 import type { CargoCommand } from "./types";
 
-/** An IntelliJ-style run configuration for a project. */
+/** The kind of thing a run configuration launches. */
+export type RunType = "application" | "maven" | "gradle" | "junit";
+
+/** An IntelliJ-style, typed run configuration for a project. */
 export interface RunConfig {
   id: string;
   name: string;
-  /** "run" → run a main class; "test" → run tests. */
-  kind: "run" | "test";
-  /** For "run": the fully-qualified main class (empty = the project's default). */
+  type: RunType;
+  /** application: the fully-qualified main class (empty = the project's default). */
   mainClass?: string;
-  /** For "test": a filter — `Class` or `Class#method` (empty = all tests). */
-  testFilter?: string;
-  /** Program args (passed to the program). */
+  /** maven/gradle: goals/tasks, space-separated (e.g. "clean install", "build test"). */
+  goals?: string;
+  /** maven: comma-separated profiles activated with `-P`. */
+  profiles?: string;
+  /** junit: a filter — `Class` or `Class#method` (empty = all tests). */
+  testTarget?: string;
+  /** application: program arguments passed to the program. */
   args: string[];
   /** Environment variables for the process. */
   env: Record<string, string>;
+}
+
+/** Migrate a stored config (older ones used `kind: "run"|"test"`). */
+function migrate(c: RunConfig & { kind?: "run" | "test"; testFilter?: string }): RunConfig {
+  if (c.type) return c;
+  if (c.kind === "test") return { ...c, type: "junit", testTarget: c.testFilter ?? "" };
+  return { ...c, type: "application" };
 }
 
 const KEY = (root: string) => `runconfigs:${root}`;
@@ -24,7 +37,7 @@ export function loadConfigs(root: string): RunConfig[] {
     const raw = localStorage.getItem(KEY(root));
     if (!raw) return [];
     const list = JSON.parse(raw);
-    return Array.isArray(list) ? list : [];
+    return Array.isArray(list) ? list.map(migrate) : [];
   } catch {
     return [];
   }
@@ -46,33 +59,60 @@ export function newId(): string {
   return `rc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** Auto-generate a sensible starter set: one "Run" per discovered main class (or a
- *  blank Run to fill in), plus "All Tests". */
+/** A new, empty configuration of the given type. */
+export function newConfig(type: RunType): RunConfig {
+  const base = { id: newId(), type, args: [], env: {} as Record<string, string> };
+  switch (type) {
+    case "maven":
+      return { ...base, name: "Maven", goals: "clean install", profiles: "" };
+    case "gradle":
+      return { ...base, name: "Gradle", goals: "build" };
+    case "junit":
+      return { ...base, name: "All Tests", testTarget: "" };
+    default:
+      return { ...base, name: "Application", mainClass: "" };
+  }
+}
+
+/** Auto-generate a starter set: one Application per discovered main class (or a
+ *  blank one), plus an "All Tests" JUnit config. */
 export function defaultConfigs(mains: string[]): RunConfig[] {
   const out: RunConfig[] = mains.map((m) => ({
     id: newId(),
     name: m.split(".").pop() || m,
-    kind: "run",
+    type: "application",
     mainClass: m,
     args: [],
     env: {},
   }));
-  if (out.length === 0) out.push({ id: newId(), name: "Run", kind: "run", mainClass: "", args: [], env: {} });
-  out.push({ id: newId(), name: "All Tests", kind: "test", testFilter: "", args: [], env: {} });
+  if (out.length === 0) out.push(newConfig("application"));
+  out.push(newConfig("junit"));
   return out;
 }
 
-/** Translate a run config into semantic flags the backend maps to Maven/Gradle:
+/** Whether this config runs through the build tool's goals rather than run/test. */
+export function isGoalConfig(c: RunConfig): boolean {
+  return c.type === "maven" || c.type === "gradle";
+}
+
+/** The build-tool goals/tasks for a maven/gradle config (incl. `-P` profiles). */
+export function goalsFor(c: RunConfig): string[] {
+  const g = parseArgs(c.goals ?? "");
+  if (c.type === "maven" && c.profiles && c.profiles.trim()) g.push(`-P${c.profiles.trim()}`);
+  return g;
+}
+
+/** Translate an application/junit config into the backend's semantic flags:
  *  `--main <class>`, `--test <filter>`, and program args after `--`. */
 export function toCargo(c: RunConfig): { command: CargoCommand; extra: string[]; env: Record<string, string> } {
   const extra: string[] = [];
-  if (c.kind === "run") {
-    if (c.mainClass && c.mainClass.trim()) extra.push("--main", c.mainClass.trim());
-    if (c.args.length) extra.push("--", ...c.args);
-    return { command: "run", extra, env: c.env };
+  if (c.type === "junit") {
+    if (c.testTarget && c.testTarget.trim()) extra.push("--test", c.testTarget.trim());
+    return { command: "test", extra, env: c.env };
   }
-  if (c.testFilter && c.testFilter.trim()) extra.push("--test", c.testFilter.trim());
-  return { command: "test", extra, env: c.env };
+  if (c.mainClass && c.mainClass.trim()) extra.push("--main", c.mainClass.trim());
+  if (c.args.length) extra.push("--", ...c.args);
+  return { command: "run", extra, env: c.env };
 }
 
 /** Split a command-line string into args, honoring single/double quotes. */
