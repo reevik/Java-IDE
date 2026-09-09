@@ -15,9 +15,28 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { QuickSearchPanel } from "./QuickSearchPanel";
-import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import { HighlightStyle, syntaxHighlighting, syntaxTree, type Language } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { java } from "@codemirror/lang-java";
+import { json } from "@codemirror/lang-json";
+import { xml } from "@codemirror/lang-xml";
 import { tags as t } from "@lezer/highlight";
+import { highlightStyle, darkHighlightStyle } from "./CodeEditor";
+
+// Highlight fenced code blocks in their own language.
+const javaLang = java().language;
+const jsonLang = json().language;
+const xmlLang = xml().language;
+function codeLanguages(info: string): Language | null {
+  switch (info.toLowerCase()) {
+    case "java": return javaLang;
+    case "json": return jsonLang;
+    case "xml":
+    case "html":
+    case "pom": return xmlLang;
+    default: return null;
+  }
+}
 
 interface Props {
   initial: string;
@@ -280,8 +299,10 @@ export default function MarkdownEditor({ initial, onChange, onSave, onCursor, re
           history(),
           drawSelection(),
           highlightActiveLine(),
-          markdown({ base: markdownLanguage }),
+          markdown({ base: markdownLanguage, codeLanguages }),
           syntaxHighlighting(mdHighlight),
+          // Colour tokens inside fenced code (java/json/xml), theme-aware.
+          syntaxHighlighting(document.documentElement.dataset.theme === "dark" ? darkHighlightStyle : highlightStyle),
           EditorView.lineWrapping,
           livePreview(basePath),
           makeBlockDecoField(basePath),

@@ -1077,7 +1077,7 @@ export interface CodeEditorHandle {
   unfoldAll(): void;
 }
 
-const highlightStyle = HighlightStyle.define([
+export const highlightStyle = HighlightStyle.define([
   { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.moduleKeyword], color: "#9333ea" },
   { tag: [t.string, t.special(t.string)], color: "#0a7d3c" },
   { tag: t.comment, color: "#8a8f98", fontStyle: "italic" },
@@ -1096,7 +1096,7 @@ const highlightStyle = HighlightStyle.define([
 ]);
 
 // Brighter syntax palette for dark backgrounds.
-const darkHighlightStyle = HighlightStyle.define([
+export const darkHighlightStyle = HighlightStyle.define([
   { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.moduleKeyword], color: "#c792ea" },
   { tag: [t.string, t.special(t.string)], color: "#89e0a0" },
   { tag: t.comment, color: "#7c828d", fontStyle: "italic" },
