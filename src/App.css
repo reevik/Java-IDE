@@ -1285,6 +1285,8 @@ select.field option {
 .md-cm .md-hr { border-bottom: 2px solid rgba(0, 0, 0, 0.15); margin: 12px 0; }
 .md-cm .md-html { margin: 8px 0; cursor: text; }
 .md-cm .md-html table { margin: 0; }
+/* Link reference definitions (`[label]: url`) are metadata — hidden in preview. */
+.md-cm .cm-line.cm-md-refdef { display: none; }
 /* A badge row: images flow inline instead of stacking one per source line. */
 .md-cm .md-img-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; cursor: text; }
 .md-cm .md-img-row a { display: inline-flex; }

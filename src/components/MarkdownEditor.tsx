@@ -264,6 +264,11 @@ function buildDecorations(view: EditorView, basePath?: string): DecorationSet {
             deco.push(Decoration.replace({ widget: new ImageWidget(m[2], m[1], basePath) }).range(node.from, node.to));
           }
           return false; // don't descend into the image's marks
+        } else if (name === "LinkReference") {
+          // A link *reference definition* (`[label]: url`) is metadata — hide it
+          // from the rendered view (revealed when the caret is on the line).
+          if (!editing(node.from, node.to)) addLines(node.from, node.to, "cm-md-refdef");
+          return false;
         } else if (name === "InlineCode") {
           deco.push(Decoration.mark({ class: "cm-inline-code" }).range(node.from, node.to));
         } else if (name === "ListMark") {
