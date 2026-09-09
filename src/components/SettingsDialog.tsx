@@ -21,6 +21,7 @@ import {
   type ImportedProfile,
   type StoredCodeStyle,
 } from "../lib/codeStyle";
+import { loadSaveActions, saveSaveActions, type SaveActions } from "../lib/saveActions";
 import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, loadMarginColumn, loadShowMargin, loadWrapAtMargin, saveAppearance, saveFont, saveMargin, type Appearance } from "../lib/theme";
 import { editorThemeOptions, loadEditorTheme, saveEditorTheme } from "../lib/editorThemes";
 
@@ -400,6 +401,8 @@ function JavaTab() {
 
       <CodeStyleSection />
 
+      <SaveActionsSection />
+
       <Section title="Active">
         <Row label="Java version" value={info?.version ? info.version : "—"} />
         <Row label="Vendor" value={info?.vendor ?? "—"} />
@@ -487,6 +490,58 @@ function CodeStyleSection() {
         <kbd className="rounded bg-[var(--surface-2)] px-1">⌘⌥L</kbd>.
       </p>
     </Section>
+  );
+}
+
+// --- Actions on save --------------------------------------------------------
+
+function SaveActionsSection() {
+  const [actions, setActions] = useState<SaveActions>(() => loadSaveActions());
+  const set = (patch: Partial<SaveActions>) => {
+    const next = { ...actions, ...patch };
+    setActions(next);
+    saveSaveActions(next);
+  };
+  return (
+    <Section title="Actions on save">
+      <div className="flex flex-col gap-1.5">
+        <CheckRow
+          checked={actions.organizeImports}
+          onChange={(v) => set({ organizeImports: v })}
+          label="Organize imports"
+          hint="Add missing, remove unused, and sort imports"
+        />
+        <CheckRow
+          checked={actions.format}
+          onChange={(v) => set({ format: v })}
+          label="Reformat code"
+          hint="Apply the selected code style"
+        />
+      </div>
+      <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+        Run automatically for Java files on every save. Organize imports runs first, then reformat.
+      </p>
+    </Section>
+  );
+}
+
+function CheckRow({
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-1 py-0.5 hover:bg-[var(--hover)]">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-3.5 w-3.5 accent-[var(--accent)]" />
+      <span className="text-[12.5px] text-[var(--text-primary)]">{label}</span>
+      <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{hint}</span>
+    </label>
   );
 }
 

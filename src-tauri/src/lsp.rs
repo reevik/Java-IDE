@@ -815,6 +815,35 @@ impl LspClient {
         Ok(apply_text_edits(text, &edits))
     }
 
+    /// Organize imports (JDT `source.organizeImports`): add missing, remove
+    /// unused, and sort. Returns the updated text (unchanged if there's nothing
+    /// to do). Ambiguous imports that need a user choice are left as-is.
+    pub async fn organize_imports(&self, path: &str, text: &str) -> Result<String> {
+        self.sync(path, text).await?;
+        let uri = uri_of(path);
+        let resp = self
+            .request(
+                "textDocument/codeAction",
+                json!({
+                    "textDocument": { "uri": uri },
+                    "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                    "context": { "diagnostics": [], "only": ["source.organizeImports"] }
+                }),
+                Duration::from_secs(10),
+            )
+            .await?;
+        let actions = resp.get("result").and_then(Value::as_array).cloned().unwrap_or_default();
+        for a in &actions {
+            if let Some(edit) = a.get("edit") {
+                let edits = workspace_edit_for_uri(edit, &uri);
+                if !edits.is_empty() {
+                    return Ok(apply_text_edits(text, &edits));
+                }
+            }
+        }
+        Ok(text.to_string())
+    }
+
     /// Fetch the source of a `jdt://` class-file URI (JDT.LS's decompiled or
     /// source-attached view of a library class) as plain text.
     pub async fn class_file_contents(&self, uri: &str) -> Result<String> {
@@ -1169,6 +1198,25 @@ fn push_text_edit(te: &Value, out: &mut Vec<TextEditItem>) {
 
 /// First target from a definition result: `Location`, `Location[]`, or
 /// `LocationLink[]`. Returns (absolute path, 0-based line, 0-based character).
+/// Collect the `TextEdit`s that a `WorkspaceEdit` targets at `uri`, from either
+/// the `changes` map or `documentChanges` form.
+fn workspace_edit_for_uri(edit: &Value, uri: &str) -> Vec<Value> {
+    if let Some(changes) = edit.get("changes").and_then(|c| c.get(uri)).and_then(Value::as_array) {
+        return changes.clone();
+    }
+    if let Some(dcs) = edit.get("documentChanges").and_then(Value::as_array) {
+        for dc in dcs {
+            let matches = dc.get("textDocument").and_then(|t| t.get("uri")).and_then(Value::as_str) == Some(uri);
+            if matches {
+                if let Some(edits) = dc.get("edits").and_then(Value::as_array) {
+                    return edits.clone();
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
 /// Apply LSP `TextEdit`s to `text`, returning the result. Edits are applied from
 /// the end backwards so earlier offsets stay valid. Positions are line/character
 /// (UTF-16 in the spec; treated as chars here, fine for typical Java source).

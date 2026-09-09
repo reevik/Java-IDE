@@ -390,6 +390,7 @@ pub fn run() {
             commands::chat_cancel,
             commands::format_java,
             commands::set_code_style,
+            commands::organize_imports,
             commands::lsp_completion,
             commands::lsp_hover,
             commands::lsp_definition,

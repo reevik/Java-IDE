@@ -24,6 +24,7 @@ import RunConfigBar from "./components/RunConfigBar";
 import RunConfigDialog from "./components/RunConfigDialog";
 import SettingsDialog, { loadModel, loadToolchainDir } from "./components/SettingsDialog";
 import { loadCodeStyle } from "./lib/codeStyle";
+import { loadSaveActions } from "./lib/saveActions";
 import {
   loadConfigs,
   saveConfigs,
@@ -66,6 +67,7 @@ import {
   debugStop,
   gitBranch,
   detectSourceRoots,
+  organizeImports,
   runMavenGoals,
   setCodeStyle,
   lspClassFileContents,
@@ -703,9 +705,29 @@ export default function App() {
       }
       patch(path, { saveState: "saving" });
       try {
-        await writeFile(path, f.content);
+        let content = f.content;
+        // Actions on save (Java files, opt-in): organize imports, then reformat.
+        if (project && !f.readOnly && path.endsWith(".java")) {
+          const sa = loadSaveActions();
+          if (sa.organizeImports || sa.format) {
+            try {
+              let next = content;
+              if (sa.organizeImports) next = await organizeImports(project.path, path, next);
+              if (sa.format) next = await formatJava(next, project.path, path);
+              if (next && next !== content) {
+                content = next;
+                if (path === activeRef.current) editorRef.current?.setDoc(content);
+                if (path === secActiveRef.current) editorRef2.current?.setDoc(content);
+                patch(path, { content });
+              }
+            } catch (e) {
+              setLines((prev) => [...prev.slice(-4000), { stream: "stderr", text: `Save actions: ${e}` }]);
+            }
+          }
+        }
+        await writeFile(path, content);
         patch(path, { saveState: "saved" });
-        if (project && path.endsWith(".java")) lspDidSave(project.path, path, f.content).catch(() => {});
+        if (project && path.endsWith(".java")) lspDidSave(project.path, path, content).catch(() => {});
       } catch (e) {
         console.error(e);
         patch(path, { saveState: "error" });

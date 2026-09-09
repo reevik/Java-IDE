@@ -2558,6 +2558,20 @@ fn google_java_format(text: &str, aosp: bool) -> Result<String, String> {
     }
 }
 
+/// Organize imports for a Java file (JDT source action); returns the new text.
+#[tauri::command]
+pub async fn organize_imports(
+    root: String,
+    path: String,
+    text: String,
+    app: tauri::AppHandle,
+    lsp: State<'_, LspState>,
+) -> Result<String, String> {
+    let mut guard = lsp.0.lock().await;
+    let client = ensure_client(&mut guard, &app, &root).await?;
+    client.organize_imports(&path, &text).await.map_err(|e| e.to_string())
+}
+
 /// Set the active Java code style. `kind` is "google" | "aosp" | "eclipse";
 /// for "eclipse", `path` is the formatter `.xml` and `profile` an optional name.
 #[tauri::command]

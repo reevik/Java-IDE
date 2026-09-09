@@ -389,6 +389,11 @@ export function formatJava(text: string, root?: string, path?: string): Promise<
   return invoke("format_java", { text, root: root ?? null, path: path ?? null });
 }
 
+/** Organize imports for a Java file (add missing, remove unused, sort). */
+export function organizeImports(root: string, path: string, text: string): Promise<string> {
+  return invoke("organize_imports", { root, path, text });
+}
+
 export type CodeStyleKind = "google" | "aosp" | "eclipse";
 /** Set the active Java code style (persisted by the frontend, re-applied on startup). */
 export function setCodeStyle(kind: CodeStyleKind, path?: string, profile?: string): Promise<void> {
