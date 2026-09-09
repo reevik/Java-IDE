@@ -114,6 +114,61 @@ class HrWidget extends WidgetType {
 }
 
 /** A rendered raw-HTML block (e.g. an HTML `<table>`). Click to edit the source. */
+type ImgItem = { alt: string; img: string; link?: string };
+
+const LINKED_IMG = /^\[!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)$/;
+const PLAIN_IMG = /^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)$/;
+
+/** If `text` (a paragraph) is nothing but image / linked-image lines, return the
+ *  items — a "badge row" to render inline. Otherwise null. */
+function imageRowItems(text: string): ImgItem[] | null {
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  if (lines.length === 0) return null;
+  const items: ImgItem[] = [];
+  for (const l of lines) {
+    const linked = LINKED_IMG.exec(l);
+    if (linked) { items.push({ alt: linked[1], img: linked[2], link: linked[3] }); continue; }
+    const plain = PLAIN_IMG.exec(l);
+    if (plain) { items.push({ alt: plain[1], img: plain[2] }); continue; }
+    return null; // a non-image line → not a pure image row
+  }
+  return items;
+}
+
+/** A row of rendered images (badges) laid out inline, replacing an image-only
+ *  paragraph so consecutive `![…]` lines don't stack. */
+class ImageRowWidget extends WidgetType {
+  constructor(readonly items: ImgItem[], readonly basePath?: string) { super(); }
+  eq(o: ImageRowWidget) { return o.basePath === this.basePath && JSON.stringify(o.items) === JSON.stringify(this.items); }
+  toDOM(view: EditorView) {
+    const row = document.createElement("div");
+    row.className = "md-img-row md-preview";
+    for (const it of this.items) {
+      const img = document.createElement("img");
+      img.src = resolveAsset(this.basePath, it.img);
+      img.alt = it.alt;
+      img.className = "md-img";
+      if (it.link) {
+        const a = document.createElement("a");
+        a.href = it.link;
+        a.appendChild(img);
+        row.appendChild(a);
+      } else {
+        row.appendChild(img);
+      }
+    }
+    row.addEventListener("mousedown", (e) => {
+      if ((e.target as HTMLElement).closest("a")) return;
+      e.preventDefault();
+      const pos = view.posAtDOM(row);
+      view.dispatch({ selection: { anchor: pos } });
+      view.focus();
+    });
+    return row;
+  }
+  ignoreEvent() { return false; }
+}
+
 /** An inline rendered Markdown image (`![alt](url)`), incl. remote badges. */
 class ImageWidget extends WidgetType {
   constructor(readonly url: string, readonly alt: string, readonly basePath?: string) { super(); }
@@ -178,6 +233,15 @@ function buildDecorations(view: EditorView, basePath?: string): DecorationSet {
       to,
       enter: (node) => {
         const name = node.name;
+        // A pure image row is drawn as one block widget — don't also add inline
+        // decorations inside it (unless the caret is there, editing the source).
+        if (name === "Paragraph") {
+          if (!editing(node.from, node.to)) {
+            const items = imageRowItems(doc.sliceString(node.from, node.to));
+            if (items && (items.length > 1 || items.some((i) => i.link))) return false;
+          }
+          return;
+        }
         if (/^ATXHeading[1-6]$/.test(name)) {
           addLine(node.from, `cm-h${name.slice(-1)}`);
         } else if (name === "Blockquote") {
@@ -195,8 +259,7 @@ function buildDecorations(view: EditorView, basePath?: string): DecorationSet {
           }
         } else if (name === "Image") {
           if (editing(node.from, node.to)) return false;
-          const raw = doc.sliceString(node.from, node.to);
-          const m = /^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)$/.exec(raw);
+          const m = PLAIN_IMG.exec(doc.sliceString(node.from, node.to));
           if (m) {
             deco.push(Decoration.replace({ widget: new ImageWidget(m[2], m[1], basePath) }).range(node.from, node.to));
           }
@@ -260,6 +323,16 @@ function buildBlockDecos(state: EditorState, basePath?: string): DecorationSet {
       } else if (node.name === "HTMLBlock") {
         if (!editing(node.from, node.to)) {
           deco.push(Decoration.replace({ widget: new HtmlWidget(doc.sliceString(node.from, node.to), basePath), block: true }).range(node.from, node.to));
+        }
+      } else if (node.name === "Paragraph") {
+        // A paragraph of only images (a badge row) → lay them out inline as one
+        // block, instead of one stacked line per source line.
+        if (!editing(node.from, node.to)) {
+          const items = imageRowItems(doc.sliceString(node.from, node.to));
+          if (items && (items.length > 1 || items.some((i) => i.link))) {
+            deco.push(Decoration.replace({ widget: new ImageRowWidget(items, basePath), block: true }).range(node.from, node.to));
+            return false;
+          }
         }
       }
     },
