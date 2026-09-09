@@ -52,7 +52,7 @@ const theme = EditorView.theme(
       fontSize: "14.5px",
       lineHeight: "1.7",
     },
-    ".cm-content": { padding: "20px 0 200px", caretColor: "var(--accent)", maxWidth: "760px", margin: "0 auto" },
+    ".cm-content": { padding: "20px 32px 200px", caretColor: "var(--accent)", maxWidth: "824px", margin: "0 auto", boxSizing: "border-box" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)", borderLeftWidth: "2px" },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: "rgba(228,85,31,0.2)" },
     ".cm-activeLine": { backgroundColor: "transparent" },
