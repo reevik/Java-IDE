@@ -20,13 +20,15 @@ const TYPES: { type: RunType; label: string }[] = [
 interface Props {
   configs: RunConfig[];
   tests: string[];
+  /** Discovered main classes, for the Application → Main class suggestions. */
+  mains: string[];
   onSave: (configs: RunConfig[]) => void;
   onClose: () => void;
 }
 
 /** IntelliJ-style "Edit Run Configurations" modal: a list on the left, a form on
  *  the right for the selected config. */
-export default function RunConfigDialog({ configs, tests, onSave, onClose }: Props) {
+export default function RunConfigDialog({ configs, tests, mains, onSave, onClose }: Props) {
   const [draft, setDraft] = useState<RunConfig[]>(() => configs.map((c) => ({ ...c })));
   const [selId, setSelId] = useState<string | null>(draft[0]?.id ?? null);
   const sel = draft.find((c) => c.id === selId) ?? null;
@@ -142,12 +144,11 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
                 {sel.type === "application" && (
                   <>
                     <Field label="Main class" hint="Fully-qualified, e.g. com.example.Main. Empty uses the project's configured main.">
-                      <input
+                      <SuggestInput
                         value={sel.mainClass ?? ""}
-                        onChange={(e) => update({ mainClass: e.target.value || undefined })}
-                        placeholder="com.example.Main"
-                        spellCheck={false}
-                        className="field w-full px-2 py-1.5 font-mono text-[12px]"
+                        onChange={(v) => update({ mainClass: v || undefined })}
+                        suggestions={mains}
+                        placeholder={mains.length ? "com.example.Main — type or pick below" : "com.example.Main"}
                       />
                     </Field>
                     <Field label="Program arguments" hint="Passed to the program. Quote args with spaces.">
@@ -190,10 +191,11 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
 
                 {sel.type === "junit" && (
                   <Field label="Test filter" hint="Empty runs all tests. Otherwise Class or Class#method, e.g. FooTest or FooTest#works.">
-                    <TestFilterInput
+                    <SuggestInput
                       value={sel.testTarget ?? ""}
                       onChange={(v) => update({ testTarget: v })}
                       suggestions={tests}
+                      placeholder={tests.length ? "all tests — type or pick below" : "all tests"}
                     />
                   </Field>
                 )}
@@ -221,11 +223,21 @@ export default function RunConfigDialog({ configs, tests, onSave, onClose }: Pro
   );
 }
 
-/** Test-filter input with a live suggestions dropdown of discovered test names. */
-function TestFilterInput({ value, onChange, suggestions }: { value: string; onChange: (v: string) => void; suggestions: string[] }) {
+/** A monospace input with a live suggestions dropdown (fuzzy substring match). */
+function SuggestInput({
+  value,
+  onChange,
+  suggestions,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  suggestions: string[];
+  placeholder?: string;
+}) {
   const [open, setOpen] = useState(false);
   const q = value.trim().toLowerCase();
-  const matches = suggestions.filter((s) => s.toLowerCase().includes(q)).slice(0, 6);
+  const matches = suggestions.filter((s) => s.toLowerCase().includes(q)).slice(0, 8);
   return (
     <div className="relative">
       <input
@@ -233,7 +245,8 @@ function TestFilterInput({ value, onChange, suggestions }: { value: string; onCh
         onChange={(e) => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
-        placeholder={suggestions.length ? "all tests — type or pick below" : "all tests"}
+        placeholder={placeholder}
+        spellCheck={false}
         className="field w-full px-2 py-1.5 font-mono text-[12px]"
       />
       {open && matches.length > 0 && (

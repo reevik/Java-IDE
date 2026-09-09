@@ -1921,6 +1921,7 @@ export default function App() {
         <RunConfigDialog
           configs={runConfigs}
           tests={testNames ?? []}
+          mains={info?.bins ?? []}
           onSave={(next) => { persistConfigs(next); setEditingConfigs(false); }}
           onClose={() => setEditingConfigs(false)}
         />
