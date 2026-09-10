@@ -21,6 +21,7 @@ import {
   type GitFileChange,
 } from "../lib/api";
 import Resizer from "./Resizer";
+import MergeTool from "./MergeTool";
 
 interface Props {
   /** Repo/project root. */
@@ -307,6 +308,7 @@ function CurrentChanges({ root, onOpenDiff, onOpenFile }: { root: string; onOpen
     refetchInterval: 3000,
   });
   const [resolving, setResolving] = useState<GitChange | null>(null);
+  const [merging, setMerging] = useState<GitChange | null>(null);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["git-status", root] });
   const stage = async (paths: string[]) => { try { await gitStage(root, paths); refresh(); } catch (e) { alert(String(e)); } };
@@ -342,8 +344,17 @@ function CurrentChanges({ root, onOpenDiff, onOpenFile }: { root: string; onOpen
           root={root}
           change={resolving}
           onOpenFile={onOpenFile}
+          onMerge={() => { setMerging(resolving); setResolving(null); }}
           onDone={() => { setResolving(null); refresh(); }}
           onClose={() => setResolving(null)}
+        />
+      )}
+      {merging && (
+        <MergeTool
+          root={root}
+          path={merging.path}
+          onResolved={() => { setMerging(null); refresh(); }}
+          onClose={() => setMerging(null)}
         />
       )}
     </div>
@@ -381,10 +392,11 @@ function ConflictGroup({ items, onOpen, onResolve }: { items: GitChange[]; onOpe
 }
 
 /** A small dialog offering ways to resolve one conflicted file. */
-function ConflictResolver({ root, change, onOpenFile, onDone, onClose }: {
+function ConflictResolver({ root, change, onOpenFile, onMerge, onDone, onClose }: {
   root: string;
   change: GitChange;
   onOpenFile: (relPath: string) => void;
+  onMerge: () => void;
   onDone: () => void;
   onClose: () => void;
 }) {
@@ -411,8 +423,13 @@ function ConflictResolver({ root, change, onOpenFile, onDone, onClose }: {
 
         <div className="flex flex-col gap-2">
           <ResolveOption
+            title="Open 3-way merge tool"
+            detail="Resolve conflict-by-conflict with Current, Result, and Incoming side by side."
+            onClick={onMerge}
+          />
+          <ResolveOption
             title="Edit manually"
-            detail="Open the file and resolve the <<<<<<< / ======= / >>>>>>> markers yourself, then Mark resolved."
+            detail="Open the raw file and resolve the <<<<<<< / ======= / >>>>>>> markers yourself, then Mark resolved."
             onClick={() => { onOpenFile(change.path); onClose(); }}
           />
           <ResolveOption title="Use current (ours)" detail="Keep this branch's version and discard the incoming changes for this file." busy={busy === "ours"} onClick={() => void take("ours")} />
