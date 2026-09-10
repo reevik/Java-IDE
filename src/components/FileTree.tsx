@@ -54,6 +54,8 @@ interface Props {
   onMove: (paths: string[], dir: string) => Promise<void>;
   /** Copy the given paths into `dir`; throws with a message on failure. */
   onCopy: (paths: string[], dir: string) => Promise<void>;
+  /** Undo the last move/copy (bound to ⌘Z while the explorer is focused). */
+  onUndo: () => void;
   /** Open the Project Structure dialog (mark source/resource/test roots). */
   onOpenStructure: () => void;
 }
@@ -132,7 +134,8 @@ const PROMPT: Record<NewKind, { title: string; placeholder: string; hint?: strin
 
 interface Menu { x: number; y: number; dir: string; targets: string[] }
 
-export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onMove, onCopy, onOpenStructure }: Props) {
+export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onMove, onCopy, onUndo, onOpenStructure }: Props) {
+  const navRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(rootPath));
   // Restore the saved expand/collapse state when switching projects.
   useEffect(() => setCollapsed(loadCollapsed(rootPath)), [rootPath]);
@@ -270,6 +273,7 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
       next.delete(dir);
       writeCollapsed(next);
       setSel(new Set());
+      navRef.current?.focus(); // so ⌘Z can immediately undo the operation
     } catch (e) {
       alert(String(e));
     }
@@ -357,9 +361,15 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
         </button>
       </div>
       <nav
+        ref={navRef}
         tabIndex={0}
         onContextMenu={(e) => openMenu(e, null)}
         onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+            e.preventDefault();
+            onUndo();
+            return;
+          }
           if ((e.key === "Delete" || e.key === "Backspace") && sel.size > 0) {
             e.preventDefault();
             setConfirmDelete([...sel]);

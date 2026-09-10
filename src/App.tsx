@@ -1006,10 +1006,11 @@ export default function App() {
     [qc, project?.path, closeTab],
   );
 
-  // Move files/dirs into a target directory, then remap any open tabs whose
-  // paths changed and refresh the tree.
-  const moveInTree = useCallback(
-    async (paths: string[], dir: string) => {
+  // Perform a move: move each path into `dir`, remap any open tabs whose paths
+  // changed, refresh the tree. Returns {from,to} pairs (for undo). Does NOT
+  // record undo itself, so it can be reused to undo a move.
+  const doMove = useCallback(
+    async (paths: string[], dir: string): Promise<{ from: string; to: string }[]> => {
       const news = await movePaths(paths, dir);
       const map = new Map<string, string>();
       paths.forEach((p, i) => { if (news[i]) map.set(p, news[i]); });
@@ -1032,19 +1033,61 @@ export default function App() {
       setSecActive((p) => (p ? remap(p) ?? p : p));
       await qc.invalidateQueries({ queryKey: ["tree", project?.path] });
       qc.invalidateQueries({ queryKey: ["modules", project?.path] });
+      return paths.map((p, i) => ({ from: p, to: news[i] })).filter((x) => x.to);
     },
     [qc, project?.path],
   );
 
-  // Copy files/dirs into a target directory, then refresh the tree.
+  // Undo stack for file-tree operations (move / copy). Reversed with ⌘Z when the
+  // explorer is focused.
+  const treeUndo = useRef<({ type: "move"; pairs: { from: string; to: string }[] } | { type: "copy"; created: string[] })[]>([]);
+
+  const moveInTree = useCallback(
+    async (paths: string[], dir: string) => {
+      const pairs = await doMove(paths, dir);
+      if (pairs.length) treeUndo.current.push({ type: "move", pairs });
+    },
+    [doMove],
+  );
+
   const copyInTree = useCallback(
     async (paths: string[], dir: string) => {
-      await copyPaths(paths, dir);
+      const created = await copyPaths(paths, dir);
+      if (created.length) treeUndo.current.push({ type: "copy", created });
       await qc.invalidateQueries({ queryKey: ["tree", project?.path] });
       qc.invalidateQueries({ queryKey: ["modules", project?.path] });
     },
     [qc, project?.path],
   );
+
+  // Undo the most recent tree operation: move files back to where they came
+  // from, or delete the copies a paste created.
+  const undoTree = useCallback(async () => {
+    const entry = treeUndo.current.pop();
+    if (!entry) return;
+    try {
+      if (entry.type === "copy") {
+        for (const p of entry.created) await deletePath(p);
+        for (const f of filesRef.current) {
+          if (entry.created.some((p) => f.path === p || f.path.startsWith(p + "/"))) closeTab(f.path);
+        }
+        await qc.invalidateQueries({ queryKey: ["tree", project?.path] });
+        qc.invalidateQueries({ queryKey: ["modules", project?.path] });
+      } else {
+        // Group by each item's original parent directory, then move back.
+        const groups = new Map<string, string[]>();
+        for (const { from, to } of entry.pairs) {
+          const origDir = from.slice(0, from.lastIndexOf("/"));
+          const list = groups.get(origDir) ?? [];
+          list.push(to);
+          groups.set(origDir, list);
+        }
+        for (const [origDir, tos] of groups) await doMove(tos, origDir);
+      }
+    } catch (e) {
+      alert(String(e));
+    }
+  }, [qc, project?.path, closeTab, doMove]);
 
   // Reformat the active Java file in place with the selected code style.
   const reformatActive = useCallback(async () => {
@@ -1752,6 +1795,7 @@ export default function App() {
                     onDelete={deleteInTree}
                     onMove={moveInTree}
                     onCopy={copyInTree}
+                    onUndo={undoTree}
                     onOpenStructure={() => setStructureOpen(true)}
                   />
                 ) : leftTab === "modules" ? (
