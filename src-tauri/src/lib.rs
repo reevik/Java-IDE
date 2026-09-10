@@ -385,6 +385,7 @@ pub fn run() {
             commands::review_code,
             commands::explain_code,
             commands::fix_error,
+            commands::generate_tasks,
             commands::chat_send,
             commands::chat_agent,
             commands::chat_cancel,

@@ -23,6 +23,7 @@ import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
 import RunConfigDialog from "./components/RunConfigDialog";
 import SettingsDialog, { loadModel, loadToolchainDir } from "./components/SettingsDialog";
+import TaskBoardDialog from "./components/TaskBoardDialog";
 import { loadCodeStyle } from "./lib/codeStyle";
 import { loadSaveActions } from "./lib/saveActions";
 import {
@@ -200,6 +201,7 @@ export default function App() {
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [editingConfigs, setEditingConfigs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showBoard, setShowBoard] = useState(false);
   const [gotoLine, setGotoLine] = useState(false);
   const [runMenu, setRunMenu] = useState<{ run: Runnable; path: string; x: number; y: number } | null>(null);
   const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies" | "maven">("project");
@@ -1393,6 +1395,7 @@ export default function App() {
       { id: "run.edit", group: "Run", title: "Edit Run Configurations…", disabled: !project, disabledReason: noProject, run: () => setEditingConfigs(true) },
       { id: "app.settings", group: "View", title: "Settings…", hint: "⌘,", run: () => setShowSettings(true) },
       { id: "project.settings", group: "View", title: "Project Settings…", disabled: !project, disabledReason: noProject, run: () => setStructureOpen(true) },
+      { id: "view.taskboard", group: "View", title: "Task Board…", disabled: !project, disabledReason: noProject, run: () => setShowBoard(true) },
       { id: "cargo.test", group: "Build", title: "Test (all)", hint: "⌘U", disabled: !project, disabledReason: noProject, run: () => void runCargo("test") },
       { id: "cargo.clippy", group: "Build", title: "Check", hint: "⌘L", disabled: !project, disabledReason: noProject, run: () => void runCargo("clippy") },
       { id: "cargo.check", group: "Code", title: "Code Analysis", hint: "⌘⇧B", disabled: !project, disabledReason: noProject, run: () => void runCargo("check") },
@@ -1667,6 +1670,7 @@ export default function App() {
           />
           <CargoButton iconOnly onClick={() => void runCargo("build")} disabled={running} label="Build" hint="⌘B" icon={<HammerIcon />} />
           <CargoButton iconOnly onClick={() => void runCargo("clippy")} disabled={running} label="Check" hint="⌘L" icon={<SparkleIcon />} />
+          <CargoButton iconOnly onClick={() => setShowBoard(true)} label="Task Board" icon={<BoardIcon />} />
           {running && (
             <button onClick={() => void cargoCancel()} className="btn-bezel ml-1 px-2.5 py-1 text-[12px]">
               Stop
@@ -1930,6 +1934,8 @@ export default function App() {
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
 
+      {showBoard && project && <TaskBoardDialog root={project.path} onClose={() => setShowBoard(false)} />}
+
       {runMenu && (
         <>
           <div className="fixed inset-0 z-[70]" onClick={() => setRunMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRunMenu(null); }} />
@@ -2129,9 +2135,9 @@ function CargoButton({
   iconOnly,
 }: {
   onClick: () => void;
-  disabled: boolean;
+  disabled?: boolean;
   label: string;
-  hint: string;
+  hint?: string;
   icon: React.ReactNode;
   iconOnly?: boolean;
 }) {
@@ -2139,7 +2145,7 @@ function CargoButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      title={`${label} (${hint})`}
+      title={hint ? `${label} (${hint})` : label}
       className={`flex items-center gap-1.5 rounded-md border border-[color:var(--line)] bg-[var(--control-bg)] py-1 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--hover)] disabled:opacity-40 ${
         iconOnly ? "px-2" : "px-2.5"
       }`}
@@ -2215,6 +2221,15 @@ function SparkleIcon() {
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-secondary)]">
       <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
       <path d="M18 15l.7 1.8 1.8.7-1.8.7L18 20l-.7-1.8-1.8-.7 1.8-.7z" />
+    </svg>
+  );
+}
+
+function BoardIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-secondary)]">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16M15 4v16" />
     </svg>
   );
 }

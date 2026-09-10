@@ -430,6 +430,26 @@ pub async fn fix_via_api(api_key: &str, error: &str, code: &str) -> Result<Strin
     api_text(api_key, FIX_PROMPT, &user).await
 }
 
+// --- Task board: turn a description into tasks -------------------------------
+
+const TASKS_PROMPT: &str = "You break a feature request or description into a small set of actionable development tasks for a Trello-style board. Respond with ONLY a JSON array — no prose, no markdown, no code fences. Each element is an object: {\"title\": string (short, imperative, e.g. \"Add login endpoint\"), \"description\": string (one or two sentences of detail; may be empty), \"column\": string (exactly one of the provided column names)}. Produce between 3 and 8 tasks. Put tasks in the first column unless the description clearly implies another.";
+
+fn tasks_user(description: &str, columns: &[String]) -> String {
+    format!("Columns (use these exact names): {}\n\nDescription:\n{}", columns.join(", "), description)
+}
+
+pub async fn tasks_via_cli<F>(cli: &Path, description: &str, columns: &[String], on_progress: F) -> Result<String>
+where
+    F: FnMut(&str),
+{
+    let prompt = format!("{TASKS_PROMPT}\n\n---\n\n{}", tasks_user(description, columns));
+    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, None, on_progress, |_| {}).await
+}
+
+pub async fn tasks_via_api(api_key: &str, description: &str, columns: &[String]) -> Result<String> {
+    api_text(api_key, TASKS_PROMPT, &tasks_user(description, columns)).await
+}
+
 // --- Vibe Coder chat --------------------------------------------------------
 
 const VIBE_PROMPT: &str = "You are the AI Assistant, a friendly, pragmatic Java pair-programmer living inside an IDE. Help the developer write, understand, debug, and refactor Java, grounded in the file they have open and the surrounding project.\n\nSTAY STRICTLY ON TOPIC. You only answer questions about: this project and its code, the currently open file, the Java language and its ecosystem/tooling (Maven, Gradle, the JDK/standard library, JUnit, Spring, streams, generics, etc.), computer science, and software development/engineering. If asked about anything unrelated — politics, sports, celebrities, news, general trivia, personal or life advice, and so on — do NOT answer it; briefly and politely decline and offer to help with the code instead.\n\nKeep replies focused and concrete; use short Markdown with fenced ```java code blocks. Prefer idiomatic modern Java.\n\nWhenever you point at a place in the code, cite it as an inline-code path relative to the project root, with a line number when you know it — e.g. `src/main/java/com/example/App.java` or `src/main/java/com/example/App.java:128`. The IDE turns these into clickable links that open the file at that line, so prefer `path:line` for anything specific.";

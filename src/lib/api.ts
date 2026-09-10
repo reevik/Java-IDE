@@ -389,6 +389,16 @@ export function formatJava(text: string, root?: string, path?: string): Promise<
   return invoke("format_java", { text, root: root ?? null, path: path ?? null });
 }
 
+export interface GeneratedTask {
+  title: string;
+  description: string;
+  column: string;
+}
+/** Ask the AI to break a description into board tasks (title/description/column). */
+export function generateTasks(description: string, columns: string[]): Promise<GeneratedTask[]> {
+  return invoke("generate_tasks", { description, columns });
+}
+
 /** Organize imports for a Java file (add missing, remove unused, sort). */
 export function organizeImports(root: string, path: string, text: string): Promise<string> {
   return invoke("organize_imports", { root, path, text });
