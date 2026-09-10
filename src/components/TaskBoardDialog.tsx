@@ -302,12 +302,20 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
   // --- specs & AI ---
   const setSpecs = (specs: Spec[]) => updateBoard((b) => ({ ...b, specs }));
   const addGeneratedTasks = (tasks: GeneratedTask[], ref: SpecRef) => {
+    // Assign ids up front so AI-provided dependencies (given by title) resolve.
+    const created = tasks.filter((t) => t.title?.trim()).map((t) => ({ gen: t, id: newId() }));
+    const idByTitle = new Map<string, string>();
+    for (const { gen, id } of created) idByTitle.set(gen.title.trim().toLowerCase(), id);
+    const built = created.map(({ gen, id }) => {
+      const dependsOn = Array.from(new Set((gen.deps ?? []).map((d) => idByTitle.get(d.trim().toLowerCase())).filter((x): x is string => !!x && x !== id)));
+      const task: Task = { id, title: gen.title.trim(), description: gen.description?.trim() || undefined, spec: ref, ...(dependsOn.length ? { dependsOn } : {}) };
+      return { task, column: gen.column };
+    });
     updateBoard((b) => {
       const cols = b.columns.map((c) => ({ ...c, tasks: [...c.tasks] }));
-      for (const t of tasks) {
-        const target = cols.find((c) => c.name.toLowerCase() === t.column.toLowerCase()) ?? cols[0];
-        if (!target || !t.title?.trim()) continue;
-        target.tasks.push({ id: newId(), title: t.title.trim(), description: t.description?.trim() || undefined, spec: ref });
+      for (const { task, column } of built) {
+        const target = cols.find((c) => c.name.toLowerCase() === column.toLowerCase()) ?? cols[0];
+        if (target) target.tasks.push(task);
       }
       return { ...b, columns: cols };
     });

@@ -393,6 +393,8 @@ export interface GeneratedTask {
   title: string;
   description: string;
   column: string;
+  /** Titles of other generated tasks this one depends on (AI-determined). */
+  deps: string[];
 }
 /** Ask the AI to break a description into board tasks (title/description/column). */
 export function generateTasks(description: string, columns: string[]): Promise<GeneratedTask[]> {

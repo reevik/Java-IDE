@@ -2662,6 +2662,9 @@ pub struct GeneratedTask {
     pub title: String,
     pub description: String,
     pub column: String,
+    /// Titles of other generated tasks that must be done first (the AI decides
+    /// the ordering); resolved to task ids on the frontend.
+    pub deps: Vec<String>,
 }
 
 /// Turn a free-text description into board tasks via the AI. Returns the parsed
@@ -2708,7 +2711,15 @@ pub async fn generate_tasks(
                 .find(|c| c.eq_ignore_ascii_case(col.trim()))
                 .cloned()
                 .unwrap_or_else(|| default_col.clone());
-            Some(GeneratedTask { title, description, column })
+            // Prerequisite task titles (the AI's ordering). Accept "dependsOn"
+            // or "deps"; each entry is a title string.
+            let deps = v
+                .get("dependsOn")
+                .or_else(|| v.get("deps"))
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().filter_map(|s| s.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .unwrap_or_default();
+            Some(GeneratedTask { title, description, column, deps })
         })
         .collect();
     Ok(tasks)
