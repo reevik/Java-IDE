@@ -389,6 +389,7 @@ pub fn run() {
             commands::chat_send,
             commands::chat_agent,
             commands::chat_cancel,
+            commands::task_agent,
             commands::format_java,
             commands::set_code_style,
             commands::organize_imports,

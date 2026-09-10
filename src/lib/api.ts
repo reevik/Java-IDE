@@ -431,6 +431,14 @@ export function chatCancel(): Promise<void> {
   return invoke("chat_cancel");
 }
 
+/** Run the coding agent on one board ticket. `taskContext` is the ticket brief
+ *  (title/description/spec); `messages` is the comment thread as a conversation.
+ *  Edits files in `root`; streams via `task-agent:progress` / `:status` / `:edit`
+ *  (all tagged with `taskId`). Returns the reply whose last line is `STATUS: …`. */
+export function taskAgent(taskId: string, taskContext: string, messages: ChatMsg[], root: string): Promise<string> {
+  return invoke("task_agent", { taskId, taskContext, messages, root });
+}
+
 export interface LspCompletion {
   label: string;
   filter_text: string;

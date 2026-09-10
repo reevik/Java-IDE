@@ -526,6 +526,46 @@ where
     cli_streamed(cli, &prompt, root, Some(perm), Some(handle), on_progress, on_status).await
 }
 
+// --- Task board: an agent works a single ticket ------------------------------
+
+const TASK_AGENT_PROMPT: &str = "You are an autonomous coding agent assigned a single task (ticket) on a Trello-style board in this Java project. Carry out the task using your tools to read and EDIT files directly — apply the changes yourself, do not just describe them. Keep edits minimal, focused, and idiomatic.\n\nEverything you write is posted as a COMMENT on the ticket for a human to read, so narrate your progress in clear, concise Markdown as you go. Cite files as `path:line`. The human can reply with their own comments; treat the most recent human comments as instructions or as answers to questions you asked.\n\nWork autonomously, but involve the human when it matters. When you STOP, the VERY LAST line of your reply MUST be exactly one of these control tokens, on its own line, with nothing after it:\n- `STATUS: DONE` — the task is fully complete.\n- `STATUS: NEEDS_INPUT` — you need information or a decision from the human before you can continue; ask your specific question(s) in the text above.\n- `STATUS: REVIEW` — you have made changes that a human should cross-check before this is considered done (use this for complex or risky work); summarize what to review.\n- `STATUS: BLOCKED` — you cannot proceed; explain why.\nChoose NEEDS_INPUT when you are genuinely stuck without an answer, and REVIEW when you have done the work but a human should verify it. Never invent facts to avoid asking.";
+
+fn task_prompt(task_context: &str, messages: &[ChatMsg]) -> String {
+    let mut prompt = String::from(TASK_AGENT_PROMPT);
+    prompt.push_str("\n\n---\n\n# Assigned task\n\n");
+    prompt.push_str(task_context.trim());
+    prompt.push_str("\n\n# Ticket comments (oldest first)\n");
+    if messages.is_empty() {
+        prompt.push_str("\n_(No comments yet — begin working on the task.)_\n");
+    } else {
+        for m in messages {
+            let who = if m.role == "assistant" { "Agent" } else { "Human" };
+            prompt.push_str(&format!("\n**{who}:** {}\n", m.content));
+        }
+    }
+    prompt
+}
+
+/// Runs the coding agent for one ticket turn: it edits files in `root` and
+/// streams progress (posted as a ticket comment). Returns the final reply,
+/// whose last line carries a `STATUS:` control token.
+pub async fn task_agent_via_cli<F, G>(
+    cli: &Path,
+    root: &Path,
+    task_context: &str,
+    messages: &[ChatMsg],
+    handle: &Arc<AgentHandle>,
+    on_progress: F,
+    on_status: G,
+) -> Result<String>
+where
+    F: FnMut(&str),
+    G: FnMut(&str),
+{
+    let prompt = task_prompt(task_context, messages);
+    cli_streamed(cli, &prompt, root, Some("acceptEdits"), Some(handle), on_progress, on_status).await
+}
+
 pub async fn chat_via_api(api_key: &str, context: Option<&str>, messages: &[ChatMsg]) -> Result<String> {
     let system = chat_system(context);
     let msgs: Vec<Value> = messages

@@ -2351,6 +2351,52 @@ pub async fn chat_agent(
         .map_err(|e| e.to_string())
 }
 
+/// Payload for task-agent streaming events, tagged with the ticket id so the
+/// frontend can route progress to the right task.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskAgentEvent {
+    task_id: String,
+    text: String,
+}
+
+/// Runs the coding agent on a single board ticket. It edits files in `root`,
+/// streaming progress via `task-agent:progress` (and tool activity via
+/// `task-agent:status` / edited files via `task-agent:edit`), all tagged with
+/// `task_id`. Returns the final reply, whose last line is a `STATUS:` token.
+#[tauri::command]
+pub async fn task_agent(
+    task_id: String,
+    task_context: String,
+    messages: Vec<llm::ChatMsg>,
+    root: String,
+    state: State<'_, AppState>,
+    agent: State<'_, AgentState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let dir = PathBuf::from(&root);
+    ensure_within_projects(&dir, &state)?;
+    let cli = llm::find_claude_cli()
+        .ok_or("The task agent needs the Claude CLI. Install it to let an agent work on tickets.")?;
+    agent.0.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    let (tid_p, app_p) = (task_id.clone(), app.clone());
+    let emit = move |acc: &str| {
+        let _ = app_p.emit("task-agent:progress", TaskAgentEvent { task_id: tid_p.clone(), text: acc.to_string() });
+    };
+    let (tid_s, app_s) = (task_id.clone(), app.clone());
+    let emit_status = move |s: &str| {
+        if let Some(path) = s.strip_prefix("\u{1}EDIT\u{1}") {
+            let _ = app_s.emit("task-agent:edit", TaskAgentEvent { task_id: tid_s.clone(), text: path.to_string() });
+        } else {
+            let _ = app_s.emit("task-agent:status", TaskAgentEvent { task_id: tid_s.clone(), text: s.to_string() });
+        }
+    };
+    llm::task_agent_via_cli(&cli, &dir, &task_context, &messages, &agent.0, emit, emit_status)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Stop the currently running agent (kills the CLI process).
 #[tauri::command]
 pub fn chat_cancel(agent: State<'_, AgentState>) {
