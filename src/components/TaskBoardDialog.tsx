@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { generateTasks } from "../lib/api";
+import type { GeneratedTask } from "../lib/api";
+import SpecDialog from "./SpecDialog";
 import {
   loadBoards,
   loadSelectedBoardId,
@@ -9,6 +10,8 @@ import {
   saveSelectedBoardId,
   type Board,
   type Column,
+  type Spec,
+  type SpecRef,
   type Task,
 } from "../lib/taskBoards";
 
@@ -17,8 +20,9 @@ interface Props {
   onClose: () => void;
 }
 
-/** A Trello-style task board: multiple boards, customizable columns, drag-and-drop
- *  cards, manual add, and AI task generation. State persists per project. */
+/** A Trello-style task board: multiple boards, freely reorderable customizable
+ *  columns, drag-and-drop cards, manual add, and AI task generation driven from
+ *  versioned specs. State persists per project. */
 export default function TaskBoardDialog({ root, onClose }: Props) {
   const [boards, setBoards] = useState<Board[]>(() => loadBoards(root));
   const [selId, setSelId] = useState<string>(() => {
@@ -41,6 +45,9 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
 
   const [boardMenu, setBoardMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [specOpen, setSpecOpen] = useState(false);
+  const [specFocus, setSpecFocus] = useState<{ specId: string; version: number } | null>(null);
+  const [dragCol, setDragCol] = useState<string | null>(null);
 
   // --- board ops ---
   const addBoard = () => {
@@ -63,19 +70,21 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
     updateBoard((b) => ({ ...b, columns: b.columns.map((c) => (c.id === colId ? { ...c, name } : c)) }));
   const deleteColumn = (colId: string) =>
     updateBoard((b) => ({ ...b, columns: b.columns.filter((c) => c.id !== colId) }));
-  const moveColumn = (colId: string, dir: -1 | 1) =>
+  const moveColumn = (colId: string, beforeId: string | null) =>
     updateBoard((b) => {
-      const i = b.columns.findIndex((c) => c.id === colId);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= b.columns.length) return b;
+      if (colId === beforeId) return b;
       const cols = [...b.columns];
-      [cols[i], cols[j]] = [cols[j], cols[i]];
+      const from = cols.findIndex((c) => c.id === colId);
+      if (from < 0) return b;
+      const [moved] = cols.splice(from, 1);
+      const idx = beforeId == null ? cols.length : cols.findIndex((c) => c.id === beforeId);
+      cols.splice(idx < 0 ? cols.length : idx, 0, moved);
       return { ...b, columns: cols };
     });
 
   // --- task ops ---
-  const addTask = (colId: string, title: string, description = "") => {
-    const t: Task = { id: newId(), title: title.trim(), description: description.trim() || undefined };
+  const addTask = (colId: string, title: string, description = "", spec?: SpecRef) => {
+    const t: Task = { id: newId(), title: title.trim(), description: description.trim() || undefined, spec };
     if (!t.title) return;
     updateBoard((b) => ({ ...b, columns: b.columns.map((c) => (c.id === colId ? { ...c, tasks: [...c.tasks, t] } : c)) }));
   };
@@ -110,6 +119,24 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
         }),
       };
     });
+  };
+
+  // --- specs & AI ---
+  const setSpecs = (specs: Spec[]) => updateBoard((b) => ({ ...b, specs }));
+  const addGeneratedTasks = (tasks: GeneratedTask[], ref: SpecRef) => {
+    updateBoard((b) => {
+      const cols = b.columns.map((c) => ({ ...c, tasks: [...c.tasks] }));
+      for (const t of tasks) {
+        const target = cols.find((c) => c.name.toLowerCase() === t.column.toLowerCase()) ?? cols[0];
+        if (!target || !t.title?.trim()) continue;
+        target.tasks.push({ id: newId(), title: t.title.trim(), description: t.description?.trim() || undefined, spec: ref });
+      }
+      return { ...b, columns: cols };
+    });
+  };
+  const openSpec = (specId?: string, version?: number) => {
+    setSpecFocus(specId ? { specId, version: version ?? 1 } : null);
+    setSpecOpen(true);
   };
 
   return (
@@ -156,84 +183,57 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
           {boards.length > 1 && (
             <button onClick={deleteBoard} title="Delete this board" className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--hover)] hover:text-red-600"><TrashIcon /></button>
           )}
-          <div className="ml-auto" />
-          <button onClick={onClose} className="btn-bezel px-3 py-1.5 text-[12.5px]">Close</button>
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={() => openSpec()} className="btn-bezel flex items-center gap-1.5 px-3 py-1.5 text-[12.5px]">
+              <SparkIcon /> Specs & AI
+              {board.specs.length > 0 && <span className="rounded-full bg-[var(--surface-2)] px-1.5 text-[10.5px] text-[var(--text-tertiary)]">{board.specs.length}</span>}
+            </button>
+            <button onClick={onClose} className="btn-bezel px-3 py-1.5 text-[12.5px]">Close</button>
+          </div>
         </div>
-
-        <AiBar columns={board.columns.map((c) => c.name)} onTasks={(tasks) => {
-          for (const t of tasks) {
-            const col = board.columns.find((c) => c.name.toLowerCase() === t.column.toLowerCase()) ?? board.columns[0];
-            if (col) addTask(col.id, t.title, t.description);
-          }
-        }} />
 
         {/* Columns */}
         <div className="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-4">
-          {board.columns.map((col, i) => (
+          {board.columns.map((col) => (
             <ColumnView
               key={col.id}
               col={col}
-              first={i === 0}
-              last={i === board.columns.length - 1}
+              dragging={dragCol === col.id}
+              anyColDrag={dragCol != null}
+              onColDragStart={() => setDragCol(col.id)}
+              onColDragEnd={() => setDragCol(null)}
+              onColDrop={() => { if (dragCol) moveColumn(dragCol, col.id); setDragCol(null); }}
               onRename={(name) => renameColumn(col.id, name)}
               onDelete={() => deleteColumn(col.id)}
-              onMove={(dir) => moveColumn(col.id, dir)}
               onAddTask={(title) => addTask(col.id, title)}
               onEditTask={(taskId, patch) => updateTask(col.id, taskId, patch)}
               onDeleteTask={(taskId) => deleteTask(col.id, taskId)}
               onDropTask={(taskId, fromCol, beforeId) => moveTask(taskId, fromCol, col.id, beforeId)}
+              onOpenSpec={openSpec}
             />
           ))}
-          <button onClick={addColumn} className="shrink-0 rounded-lg border border-dashed border-[color:var(--line)] px-4 py-2 text-[12.5px] text-[var(--text-tertiary)] hover:bg-[var(--hover)]">
+          <button
+            onClick={addColumn}
+            onDragOver={(e) => { if (dragCol) e.preventDefault(); }}
+            onDrop={() => { if (dragCol) { moveColumn(dragCol, null); setDragCol(null); } }}
+            className="shrink-0 rounded-lg border border-dashed border-[color:var(--line)] px-4 py-2 text-[12.5px] text-[var(--text-tertiary)] hover:bg-[var(--hover)]"
+          >
             + Add column
           </button>
         </div>
       </div>
-    </div>
-  );
-}
 
-// --- AI bar -----------------------------------------------------------------
-
-function AiBar({ columns, onTasks }: { columns: string[]; onTasks: (tasks: { title: string; description: string; column: string }[]) => void }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const run = async () => {
-    const desc = text.trim();
-    if (!desc || busy) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const tasks = await generateTasks(desc, columns);
-      if (tasks.length === 0) setErr("The AI didn't return any tasks.");
-      else { onTasks(tasks); setText(""); }
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex shrink-0 items-start gap-2 border-b border-[color:var(--line)] bg-[var(--surface-2)] px-4 py-2.5">
-      <SparkIcon />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void run(); } }}
-          placeholder="Describe a feature or goal and let AI break it into tasks…  (⌘⏎ to generate)"
-          rows={2}
-          disabled={busy}
-          className="field w-full resize-none px-2 py-1.5 text-[12.5px] disabled:opacity-60"
+      {specOpen && (
+        <SpecDialog
+          specs={board.specs}
+          columns={board.columns.map((c) => c.name)}
+          onSpecsChange={setSpecs}
+          onAddTasks={addGeneratedTasks}
+          initialSpecId={specFocus?.specId ?? null}
+          initialVersion={specFocus?.version ?? null}
+          onClose={() => setSpecOpen(false)}
         />
-        {err && <span className="text-[11px] text-[var(--danger,#c22)]">{err}</span>}
-      </div>
-      <button onClick={() => void run()} disabled={busy || text.trim() === ""} className="btn-accent shrink-0 px-3 py-1.5 text-[12.5px] disabled:opacity-40">
-        {busy ? "Generating…" : "Generate tasks"}
-      </button>
+      )}
     </div>
   );
 }
@@ -241,18 +241,21 @@ function AiBar({ columns, onTasks }: { columns: string[]; onTasks: (tasks: { tit
 // --- Column -----------------------------------------------------------------
 
 function ColumnView({
-  col, first, last, onRename, onDelete, onMove, onAddTask, onEditTask, onDeleteTask, onDropTask,
+  col, dragging, anyColDrag, onColDragStart, onColDragEnd, onColDrop, onRename, onDelete, onAddTask, onEditTask, onDeleteTask, onDropTask, onOpenSpec,
 }: {
   col: Column;
-  first: boolean;
-  last: boolean;
+  dragging: boolean;
+  anyColDrag: boolean;
+  onColDragStart: () => void;
+  onColDragEnd: () => void;
+  onColDrop: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
-  onMove: (dir: -1 | 1) => void;
   onAddTask: (title: string) => void;
   onEditTask: (taskId: string, patch: Partial<Task>) => void;
   onDeleteTask: (taskId: string) => void;
   onDropTask: (taskId: string, fromCol: string, beforeId?: string) => void;
+  onOpenSpec: (specId: string, version: number) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
@@ -262,32 +265,40 @@ function ColumnView({
 
   return (
     <div
-      className={`flex max-h-full w-[290px] shrink-0 flex-col rounded-lg bg-[var(--surface-2)] ${over ? "ring-2 ring-[color:var(--accent)]" : ""}`}
+      className={`flex max-h-full w-[290px] shrink-0 flex-col rounded-lg bg-[var(--surface-2)] transition-opacity ${dragging ? "opacity-40" : ""} ${over ? "ring-2 ring-[color:var(--accent)]" : ""}`}
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
+        if (anyColDrag) { onColDrop(); return; }
         const taskId = e.dataTransfer.getData("task");
         const fromCol = e.dataTransfer.getData("col");
         if (taskId && fromCol) onDropTask(taskId, fromCol);
       }}
     >
-      <div className="flex shrink-0 items-center gap-1 px-2.5 py-2">
+      <div className="flex shrink-0 items-center gap-1 px-2 py-2">
+        <span
+          draggable
+          onDragStart={(e) => { e.dataTransfer.setData("column", col.id); e.dataTransfer.effectAllowed = "move"; onColDragStart(); }}
+          onDragEnd={onColDragEnd}
+          title="Drag to reorder column"
+          className="cursor-grab select-none px-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
+        >
+          <GripIcon />
+        </span>
         <input
           value={col.name}
           onChange={(e) => onRename(e.target.value)}
           className="min-w-0 flex-1 bg-transparent text-[12px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] outline-none"
         />
         <span className="shrink-0 rounded-full bg-[var(--surface-1,var(--hover))] px-1.5 text-[10.5px] text-[var(--text-tertiary)]">{col.tasks.length}</span>
-        <button onClick={() => onMove(-1)} disabled={first} title="Move left" className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--hover)] disabled:opacity-30">‹</button>
-        <button onClick={() => onMove(1)} disabled={last} title="Move right" className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--hover)] disabled:opacity-30">›</button>
         <button onClick={onDelete} title="Delete column" className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--hover)] hover:text-red-600"><TrashIcon /></button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {col.tasks.map((t) => (
-          <TaskCard key={t.id} task={t} colId={col.id} onEdit={(patch) => onEditTask(t.id, patch)} onDelete={() => onDeleteTask(t.id)} onDropBefore={(taskId, fromCol) => onDropTask(taskId, fromCol, t.id)} />
+          <TaskCard key={t.id} task={t} colId={col.id} onEdit={(patch) => onEditTask(t.id, patch)} onDelete={() => onDeleteTask(t.id)} onDropBefore={(taskId, fromCol) => onDropTask(taskId, fromCol, t.id)} onOpenSpec={onOpenSpec} />
         ))}
         {adding ? (
           <div className="mt-1 rounded-md border border-[color:var(--line)] bg-[var(--control-bg)] p-1.5">
@@ -312,12 +323,13 @@ function ColumnView({
 
 // --- Card -------------------------------------------------------------------
 
-function TaskCard({ task, colId, onEdit, onDelete, onDropBefore }: {
+function TaskCard({ task, colId, onEdit, onDelete, onDropBefore, onOpenSpec }: {
   task: Task;
   colId: string;
   onEdit: (patch: Partial<Task>) => void;
   onDelete: () => void;
   onDropBefore: (taskId: string, fromCol: string) => void;
+  onOpenSpec: (specId: string, version: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
@@ -346,11 +358,12 @@ function TaskCard({ task, colId, onEdit, onDelete, onDropBefore }: {
       onDragStart={(e) => { e.dataTransfer.setData("task", task.id); e.dataTransfer.setData("col", colId); e.dataTransfer.effectAllowed = "move"; }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
+        const taskId = e.dataTransfer.getData("task");
+        if (!taskId) return; // column drag — let it bubble to the column
         e.preventDefault();
         e.stopPropagation();
-        const taskId = e.dataTransfer.getData("task");
         const fromCol = e.dataTransfer.getData("col");
-        if (taskId && taskId !== task.id) onDropBefore(taskId, fromCol);
+        if (taskId !== task.id) onDropBefore(taskId, fromCol);
       }}
       onClick={() => setEditing(true)}
       className="group mt-1.5 cursor-pointer rounded-md border border-[color:var(--line)] bg-[var(--control-bg)] p-2 hover:border-[color:var(--accent-soft)]"
@@ -360,6 +373,16 @@ function TaskCard({ task, colId, onEdit, onDelete, onDropBefore }: {
         <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="shrink-0 rounded p-0.5 text-[var(--text-tertiary)] opacity-0 hover:text-red-600 group-hover:opacity-100"><TrashIcon /></button>
       </div>
       {task.description && <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-[11px] text-[var(--text-tertiary)]">{task.description}</p>}
+      {task.spec && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpenSpec(task.spec!.specId, task.spec!.version); }}
+          title={`Generated from “${task.spec.specTitle}” v${task.spec.version}`}
+          className="mt-1.5 flex max-w-full items-center gap-1 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--accent-strong,#0a66c2)]"
+        >
+          <SparkIcon small />
+          <span className="min-w-0 truncate">{task.spec.specTitle} v{task.spec.version}</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -367,6 +390,7 @@ function TaskCard({ task, colId, onEdit, onDelete, onDropBefore }: {
 // --- icons ------------------------------------------------------------------
 
 function Dot() { return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />; }
+function GripIcon() { return <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><circle cx="9" cy="6" r="1.4" /><circle cx="15" cy="6" r="1.4" /><circle cx="9" cy="12" r="1.4" /><circle cx="15" cy="12" r="1.4" /><circle cx="9" cy="18" r="1.4" /><circle cx="15" cy="18" r="1.4" /></svg>; }
 function BoardGlyph({ small }: { small?: boolean }) {
   const s = small ? 13 : 16;
   return (
@@ -378,4 +402,7 @@ function BoardGlyph({ small }: { small?: boolean }) {
 function PlusIcon() { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>; }
 function PencilIcon() { return <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>; }
 function TrashIcon() { return <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" /></svg>; }
-function SparkIcon() { return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mt-1 shrink-0 text-[var(--accent-strong,#0a66c2)]"><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15l-1.8-4.2L5.5 9l4.7-1.3zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" /></svg>; }
+function SparkIcon({ small }: { small?: boolean }) {
+  const s = small ? 11 : 14;
+  return <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15l-1.8-4.2L5.5 9l4.7-1.3zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" /></svg>;
+}
