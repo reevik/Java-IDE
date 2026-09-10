@@ -139,13 +139,49 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
   };
 
   // --- agent orchestration ---
+  const trimText = (t: string, max: number) => (t.length > max ? `${t.slice(0, max)}…` : t);
   const buildContext = (task: Task): string => {
     let s = `## ${task.title}\n\n`;
     if (task.description) s += `${task.description}\n\n`;
     if (task.spec) {
       const spec = board.specs.find((x) => x.id === task.spec!.specId);
       const ver = spec?.versions.find((v) => v.version === task.spec!.version);
-      if (ver) s += `### Source spec — ${task.spec.specTitle} (v${task.spec.version})\n\n${ver.content}\n`;
+      if (ver) s += `### Source spec — ${task.spec.specTitle} (v${task.spec.version})\n\n${ver.content}\n\n`;
+    }
+
+    // Related tickets, so the agent builds on siblings' findings instead of
+    // repeating work. Tickets from the SAME spec are included in full (with
+    // their comment threads); the rest of the board is a brief awareness list.
+    const all = board.columns.flatMap((c) => c.tasks.map((t) => ({ t, col: c.name })));
+    const others = all.filter((x) => x.t.id !== task.id);
+    const siblings = task.spec ? others.filter((x) => x.t.spec?.specId === task.spec!.specId) : [];
+
+    if (siblings.length) {
+      s += `### Related tickets (same spec)\n\nThese come from the same spec as your ticket. Reuse their findings, decisions, and file locations — do NOT re-investigate or redo work a completed ticket has already done. Prefer starting from where they left off.\n\n`;
+      for (const { t, col } of siblings) {
+        const st = t.agentStatus ? `, agent: ${agentStatusMeta(t.agentStatus).label}` : "";
+        s += `#### ${t.title}\n_Column: ${col}${st}_\n`;
+        if (t.description) s += `${t.description}\n`;
+        const notes = (t.comments ?? []).filter((c) => c.author !== "system");
+        if (notes.length) {
+          s += `\nFindings / conversation:\n`;
+          for (const c of notes) {
+            const who = c.author === "agent" ? "Agent" : "Human";
+            s += `- **${who}:** ${trimText(c.text.replace(/\n+/g, " ").trim(), 1400)}\n`;
+          }
+        }
+        s += `\n`;
+      }
+    }
+
+    const brief = others.filter((x) => !siblings.includes(x));
+    if (brief.length) {
+      s += `### Other tickets on this board\n`;
+      for (const { t, col } of brief) {
+        const st = t.agentStatus ? `, ${agentStatusMeta(t.agentStatus).label}` : "";
+        s += `- ${t.title} (${col}${st})\n`;
+      }
+      s += `\n`;
     }
     return s;
   };
