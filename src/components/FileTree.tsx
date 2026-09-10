@@ -173,6 +173,22 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
     return out;
   }, [shown, collapsed, filtering]);
 
+  // For a contiguous multi-selection, mark each selected row's position in its
+  // run so the rows render as one merged cluster (rounded top/bottom, seamless
+  // between) instead of separate pills.
+  const clusterEdges = useMemo(() => {
+    const m = new Map<string, { top: boolean; bottom: boolean }>();
+    if (sel.size === 0) return m;
+    for (let i = 0; i < visiblePaths.length; i++) {
+      const p = visiblePaths[i];
+      if (!sel.has(p)) continue;
+      const prev = visiblePaths[i - 1];
+      const next = visiblePaths[i + 1];
+      m.set(p, { top: !prev || !sel.has(prev), bottom: !next || !sel.has(next) });
+    }
+    return m;
+  }, [visiblePaths, sel]);
+
   const toggle = (path: string) => {
     const next = new Set(collapsed);
     next.has(path) ? next.delete(path) : next.add(path);
@@ -313,6 +329,7 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
                 forceOpen={filtering}
                 selectedPath={selectedPath}
                 sel={sel}
+                clusterEdges={clusterEdges}
                 problemPaths={problemPaths}
                 onClickRow={onRowClick}
                 onContext={openMenu}
@@ -449,6 +466,7 @@ function Row({
   forceOpen,
   selectedPath,
   sel,
+  clusterEdges,
   problemPaths,
   onClickRow,
   onContext,
@@ -459,6 +477,7 @@ function Row({
   forceOpen: boolean;
   selectedPath: string | null;
   sel: Set<string>;
+  clusterEdges: Map<string, { top: boolean; bottom: boolean }>;
   problemPaths: Set<string>;
   onClickRow: (e: React.MouseEvent, node: TreeNode) => void;
   onContext: (e: React.MouseEvent, node: TreeNode) => void;
@@ -469,15 +488,21 @@ function Row({
   const active = selected || (sel.size === 0 && selectedPath === node.path);
   const hasProblem = problemPaths.has(node.path);
 
+  // Cluster rendering: a contiguous run of selected rows draws as one shape.
+  const edge = clusterEdges.get(node.path);
+  const activeCls = !active
+    ? "text-[var(--text-primary)]"
+    : !edge || (edge.top && edge.bottom)
+      ? "nav-row-active"
+      : `nav-row-active nav-cluster ${edge.top ? "nav-cluster-top" : edge.bottom ? "nav-cluster-bottom" : "nav-cluster-mid"}`;
+
   return (
     <>
       <div
         onClick={(e) => onClickRow(e, node)}
         onContextMenu={(e) => onContext(e, node)}
         style={{ paddingLeft: 6 + depth * 12 }}
-        className={`nav-row flex items-center gap-1.5 py-[3px] pr-1.5 text-[12.5px] ${
-          active ? "nav-row-active" : "text-[var(--text-primary)]"
-        }`}
+        className={`nav-row flex items-center gap-1.5 py-[3px] pr-1.5 text-[12.5px] ${activeCls}`}
       >
         {isDir ? <Chevron open={open} /> : <span className="w-3 shrink-0" />}
         {node.rootKind ? <RootIcon kind={node.rootKind} /> : node.isPackage ? <PackageIcon /> : <FileIcon name={node.name} isDir={isDir} />}
@@ -500,6 +525,7 @@ function Row({
             forceOpen={forceOpen}
             selectedPath={selectedPath}
             sel={sel}
+            clusterEdges={clusterEdges}
             problemPaths={problemPaths}
             onClickRow={onClickRow}
             onContext={onContext}
