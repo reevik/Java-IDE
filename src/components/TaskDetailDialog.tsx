@@ -6,6 +6,12 @@ interface Props {
   task: Task;
   columnName: string;
   columns: { id: string; name: string }[];
+  /** Resolved current dependencies of this task. */
+  deps: { id: string; title: string; complete: boolean }[];
+  /** Tasks that may be added as a dependency (no self / cycle / duplicate). */
+  depCandidates: { id: string; title: string }[];
+  /** Titles of unfinished dependencies blocking this task, if any. */
+  blockedBy: string[];
   /** Live streaming buffer when this task's agent is currently running. */
   live: { text: string; activity: string } | null;
   running: boolean;
@@ -15,6 +21,8 @@ interface Props {
   onComment: (text: string) => void;
   onRun: () => void;
   onStop: () => void;
+  onAddDep: (depId: string) => void;
+  onRemoveDep: (depId: string) => void;
   onOpenSpec: (specId: string, version: number) => void;
   onClose: () => void;
 }
@@ -23,7 +31,7 @@ interface Props {
  *  independent status, its live progress, and the comment thread the human and the
  *  agent talk through. */
 export default function TaskDetailDialog({
-  task, columnName, columns, live, running, onEdit, onDelete, onAssign, onComment, onRun, onStop, onOpenSpec, onClose,
+  task, columnName, columns, deps, depCandidates, blockedBy, live, running, onEdit, onDelete, onAssign, onComment, onRun, onStop, onAddDep, onRemoveDep, onOpenSpec, onClose,
 }: Props) {
   const assigned = task.assignee === "agent";
   const status = task.agentStatus;
@@ -93,6 +101,7 @@ export default function TaskDetailDialog({
             <>
               <span className="text-[12px] text-[var(--text-secondary)]">
                 {assigned ? <>Agent assigned{status && <> · <b className="font-medium">{agentStatusMeta(status).label}</b></>}</> : "Not assigned"}
+                {blockedBy.length > 0 && <span className="text-[var(--text-tertiary)]"> · waiting for {blockedBy.join(", ")}</span>}
               </span>
               <div className="ml-auto flex items-center gap-2">
                 <button onClick={() => setAssigning(true)} className="btn-bezel px-2.5 py-1 text-[12px]">{assigned ? "Re-assign…" : "Assign to agent…"}</button>
@@ -106,8 +115,30 @@ export default function TaskDetailDialog({
           )}
         </div>
 
-        {/* Body: description + thread */}
+        {/* Body: dependencies + description + thread */}
         <div ref={threadRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Depends on</label>
+          <div className="mb-4 flex flex-wrap items-center gap-1.5">
+            {deps.length === 0 && <span className="text-[11.5px] text-[var(--text-tertiary)]">No dependencies. Add one to make this run only after another ticket is done.</span>}
+            {deps.map((d) => (
+              <span key={d.id} className="inline-flex items-center gap-1 rounded-full border border-[color:var(--line)] bg-[var(--control-bg)] py-0.5 pl-1.5 pr-1 text-[11px]" title={d.complete ? "Complete" : "Not finished yet"}>
+                <span className={`h-1.5 w-1.5 rounded-full ${d.complete ? "" : ""}`} style={{ background: d.complete ? "#1a7f37" : "#c2410c" }} />
+                <span className="max-w-[180px] truncate text-[var(--text-secondary)]">{d.title}</span>
+                <button onClick={() => onRemoveDep(d.id)} title="Remove dependency" className="rounded px-0.5 text-[var(--text-tertiary)] hover:text-red-600">×</button>
+              </span>
+            ))}
+            {depCandidates.length > 0 && (
+              <select
+                value=""
+                onChange={(e) => { if (e.target.value) onAddDep(e.target.value); }}
+                className="field px-1.5 py-1 text-[11.5px]"
+              >
+                <option value="">+ Add dependency…</option>
+                {depCandidates.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+              </select>
+            )}
+          </div>
+
           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Description</label>
           <textarea
             value={desc}

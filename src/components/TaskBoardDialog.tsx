@@ -57,6 +57,8 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
   const [runningId, setRunningId] = useState<string | null>(null);
   const runningRef = useRef<string | null>(null);
   runningRef.current = runningId;
+  const boardRef = useRef(board);
+  boardRef.current = board;
 
   // --- persistence (functional so sequential writes in one handler compose) ---
   const mutate = (fn: (bs: Board[]) => Board[]) =>
@@ -188,14 +190,42 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
   const toMsgs = (comments?: Comment[]): ChatMsg[] =>
     (comments ?? []).filter((c) => c.author !== "system").map((c) => ({ role: c.author === "agent" ? "assistant" : "user", content: c.text }));
 
-  const runAgent = async (task: Task, msgs: ChatMsg[]) => {
+  // --- dependencies ---
+  // A dependency is satisfied when the depended-on task's agent has finished, or
+  // the task sits in a "Done" column, or it no longer exists.
+  const findTask = (b: Board, id: string) => b.columns.flatMap((c) => c.tasks.map((t) => ({ t, col: c }))).find((x) => x.t.id === id);
+  const isComplete = (b: Board, id: string): boolean => {
+    const hit = findTask(b, id);
+    if (!hit) return true;
+    return hit.t.agentStatus === "done" || /^\s*done\s*$/i.test(hit.col.name);
+  };
+  const unmetDeps = (b: Board, task: Task): string[] =>
+    (task.dependsOn ?? []).filter((id) => !isComplete(b, id)).map((id) => findTask(b, id)?.t.title ?? "").filter(Boolean);
+  const isReady = (b: Board, task: Task) => (task.dependsOn ?? []).every((id) => isComplete(b, id));
+  /** Does `a` depend (transitively) on `b`? Used to prevent dependency cycles. */
+  const dependsOnT = (b: Board, aId: string, bId: string, seen = new Set<string>()): boolean => {
+    if (seen.has(aId)) return false;
+    seen.add(aId);
+    const deps = findTask(b, aId)?.t.dependsOn ?? [];
+    return deps.includes(bId) || deps.some((d) => dependsOnT(b, d, bId, seen));
+  };
+
+  const runAgent = async (task: Task) => {
     if (runningRef.current) return; // one agent at a time (shared CLI handle)
+    if (!isReady(boardRef.current, task)) {
+      // Not runnable yet — hold it in the queue until its dependencies finish.
+      if (task.agentStatus !== "queued") {
+        patchTask(task.id, { assignee: "agent", agentStatus: "queued" });
+        addComment(task.id, "system", `Waiting for dependencies: ${unmetDeps(boardRef.current, task).join(", ")}.`);
+      }
+      return;
+    }
     runningRef.current = task.id;
     setRunningId(task.id);
     setLive({ taskId: task.id, text: "", activity: "" });
-    patchTask(task.id, { agentStatus: "working" });
+    patchTask(task.id, { assignee: "agent", agentStatus: "working" });
     try {
-      const reply = await taskAgent(task.id, buildContext(task), msgs, root);
+      const reply = await taskAgent(task.id, buildContext(task), toMsgs(task.comments), root);
       const { status, body } = parseAgentStatus(reply);
       if (body) addComment(task.id, "agent", body);
       patchTask(task.id, { agentStatus: status });
@@ -209,10 +239,14 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
     }
   };
 
+  // Mark a task ready to run; the auto-run effect starts it when its turn comes.
+  const enqueue = (taskId: string) => patchTask(taskId, { assignee: "agent", agentStatus: "queued" });
+
   const assignToAgent = (task: Task, colId: string) => {
-    if (runningRef.current) return;
     const colName = board.columns.find((c) => c.id === colId)?.name ?? "";
-    const sys: Comment = { id: newId(), author: "system", text: `Assigned to agent · status set to “${colName}”.`, at: Date.now() };
+    const ready = isReady(board, task);
+    const note = ready ? "" : ` Waiting for dependencies: ${unmetDeps(board, task).join(", ")}.`;
+    const sys: Comment = { id: newId(), author: "system", text: `Assigned to agent · status set to “${colName}”.${note}`, at: Date.now() };
     updateBoard((b) => {
       let moved: Task | undefined;
       const stripped = b.columns.map((c) => {
@@ -221,23 +255,36 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
         return { ...c, tasks: c.tasks.filter((t) => t.id !== task.id) };
       });
       if (!moved) return b;
-      const updated: Task = { ...moved, assignee: "agent", agentStatus: "working", comments: [...(moved.comments ?? []), sys] };
+      const updated: Task = { ...moved, assignee: "agent", agentStatus: "queued", comments: [...(moved.comments ?? []), sys] };
       return { ...b, columns: stripped.map((c) => (c.id === colId ? { ...c, tasks: [...c.tasks, updated] } : c)) };
     });
-    void runAgent({ ...task, assignee: "agent" }, toMsgs(task.comments));
+    // The effect picks it up when ready; nothing to start here.
   };
 
   const postComment = (task: Task, text: string) => {
     const t = text.trim();
     if (!t) return;
     addComment(task.id, "user", t);
-    // A comment on an assigned, idle ticket is input for the agent — continue.
-    if (task.assignee === "agent" && !runningRef.current && task.agentStatus !== "working") {
-      void runAgent(task, [...toMsgs(task.comments), { role: "user", content: t }]);
-    }
+    // A comment on an assigned, idle ticket is input for the agent — re-queue it.
+    if (task.assignee === "agent" && task.agentStatus !== "working") enqueue(task.id);
   };
 
+  const addDep = (taskId: string, depId: string) =>
+    patchTask(taskId, { dependsOn: Array.from(new Set([...(findTask(board, taskId)?.t.dependsOn ?? []), depId])) });
+  const removeDep = (taskId: string, depId: string) =>
+    patchTask(taskId, { dependsOn: (findTask(board, taskId)?.t.dependsOn ?? []).filter((id) => id !== depId) });
+
   const stopAgent = () => { void chatCancel(); };
+
+  // Dependency-ordered auto-runner: whenever nothing is running, start the next
+  // queued task whose dependencies are all complete. Re-runs on every board
+  // change, so finishing one task releases the tasks that depend on it.
+  useEffect(() => {
+    if (runningId) return;
+    const next = board.columns.flatMap((c) => c.tasks).find((t) => t.assignee === "agent" && t.agentStatus === "queued" && isReady(board, t));
+    if (next) void runAgent(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningId, boards]);
 
   // Live event streams (single running agent; payloads tagged with taskId).
   useEffect(() => {
@@ -345,6 +392,7 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
               onAddTask={(title) => addTask(col.id, title)}
               onOpenTask={(taskId) => setDetailId(taskId)}
               onDropTask={(taskId, fromCol, beforeId) => moveTask(taskId, fromCol, col.id, beforeId)}
+              depOf={(t) => ({ deps: (t.dependsOn ?? []).length, unmet: (t.dependsOn ?? []).filter((id) => !isComplete(board, id)).length })}
             />
           ))}
           <button
@@ -365,12 +413,17 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
           columns={board.columns.map((c) => ({ id: c.id, name: c.name }))}
           live={live && live.taskId === detail.task.id ? { text: live.text, activity: live.activity } : null}
           running={runningId === detail.task.id}
+          deps={(detail.task.dependsOn ?? []).map((id) => { const h = findTask(board, id); return { id, title: h?.t.title ?? "(deleted)", complete: isComplete(board, id) }; })}
+          depCandidates={board.columns.flatMap((c) => c.tasks).filter((t) => t.id !== detail.task.id && !(detail.task.dependsOn ?? []).includes(t.id) && !dependsOnT(board, t.id, detail.task.id)).map((t) => ({ id: t.id, title: t.title }))}
+          blockedBy={unmetDeps(board, detail.task)}
           onEdit={(patch) => patchTask(detail.task.id, patch)}
           onDelete={() => { deleteTask(detail.task.id); setDetailId(null); }}
           onAssign={(colId) => assignToAgent(detail.task, colId)}
           onComment={(text) => postComment(detail.task, text)}
-          onRun={() => void runAgent(detail.task, toMsgs(detail.task.comments))}
+          onRun={() => enqueue(detail.task.id)}
           onStop={stopAgent}
+          onAddDep={(depId) => addDep(detail.task.id, depId)}
+          onRemoveDep={(depId) => removeDep(detail.task.id, depId)}
           onOpenSpec={openSpec}
           onClose={() => setDetailId(null)}
         />
@@ -394,7 +447,7 @@ export default function TaskBoardDialog({ root, onClose }: Props) {
 // --- Column -----------------------------------------------------------------
 
 function ColumnView({
-  col, dragging, anyColDrag, runningId, onColDragStart, onColDragEnd, onColDrop, onRename, onDelete, onAddTask, onOpenTask, onDropTask,
+  col, dragging, anyColDrag, runningId, onColDragStart, onColDragEnd, onColDrop, onRename, onDelete, onAddTask, onOpenTask, onDropTask, depOf,
 }: {
   col: Column;
   dragging: boolean;
@@ -408,6 +461,7 @@ function ColumnView({
   onAddTask: (title: string) => void;
   onOpenTask: (taskId: string) => void;
   onDropTask: (taskId: string, fromCol: string, beforeId?: string) => void;
+  depOf: (task: Task) => { deps: number; unmet: number };
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
@@ -450,7 +504,7 @@ function ColumnView({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {col.tasks.map((t) => (
-          <TaskCard key={t.id} task={t} colId={col.id} running={runningId === t.id} onOpen={() => onOpenTask(t.id)} onDropBefore={(taskId, fromCol) => onDropTask(taskId, fromCol, t.id)} />
+          <TaskCard key={t.id} task={t} colId={col.id} running={runningId === t.id} dep={depOf(t)} onOpen={() => onOpenTask(t.id)} onDropBefore={(taskId, fromCol) => onDropTask(taskId, fromCol, t.id)} />
         ))}
         {adding ? (
           <div className="mt-1 rounded-md border border-[color:var(--line)] bg-[var(--control-bg)] p-1.5">
@@ -475,10 +529,11 @@ function ColumnView({
 
 // --- Card -------------------------------------------------------------------
 
-function TaskCard({ task, colId, running, onOpen, onDropBefore }: {
+function TaskCard({ task, colId, running, dep, onOpen, onDropBefore }: {
   task: Task;
   colId: string;
   running: boolean;
+  dep: { deps: number; unmet: number };
   onOpen: () => void;
   onDropBefore: (taskId: string, fromCol: string) => void;
 }) {
@@ -501,9 +556,14 @@ function TaskCard({ task, colId, running, onOpen, onDropBefore }: {
     >
       <div className="text-[12.5px] leading-snug text-[var(--text-primary)]">{task.title}</div>
       {task.description && <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-[11px] text-[var(--text-tertiary)]">{task.description}</p>}
-      {(task.assignee === "agent" || task.spec || comments > 0) && (
+      {(task.assignee === "agent" || task.spec || comments > 0 || dep.deps > 0) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {task.assignee === "agent" && task.agentStatus && <StatusChip status={task.agentStatus} pulse={running} />}
+          {dep.deps > 0 && (
+            <span className="flex items-center gap-0.5 text-[10px]" style={dep.unmet > 0 ? { color: "#c2410c" } : { color: "var(--text-tertiary)" }} title={dep.unmet > 0 ? `Blocked by ${dep.unmet} unfinished dependency(ies)` : "Dependencies complete"}>
+              <LinkIcon /> {dep.unmet > 0 ? `${dep.unmet}/${dep.deps}` : dep.deps}
+            </span>
+          )}
           {comments > 0 && <span className="flex items-center gap-0.5 text-[10px] text-[var(--text-tertiary)]"><CommentIcon /> {comments}</span>}
           {task.spec && <span className="flex items-center gap-0.5 truncate text-[10px] text-[var(--text-tertiary)]"><SparkIcon small /> v{task.spec.version}</span>}
         </div>
@@ -527,6 +587,7 @@ function StatusChip({ status, pulse }: { status: NonNullable<Task["agentStatus"]
 function Dot() { return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />; }
 function GripIcon() { return <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><circle cx="9" cy="6" r="1.4" /><circle cx="15" cy="6" r="1.4" /><circle cx="9" cy="12" r="1.4" /><circle cx="15" cy="12" r="1.4" /><circle cx="9" cy="18" r="1.4" /><circle cx="15" cy="18" r="1.4" /></svg>; }
 function CommentIcon() { return <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12 7.7L3 21l1.8-6A8.5 8.5 0 1 1 21 11.5z" /></svg>; }
+function LinkIcon() { return <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" /></svg>; }
 function BoardGlyph({ small }: { small?: boolean }) {
   const s = small ? 13 : 16;
   return (

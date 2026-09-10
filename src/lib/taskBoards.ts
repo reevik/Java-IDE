@@ -9,7 +9,7 @@ export interface SpecRef {
 
 /** Independent lifecycle of the agent working a ticket (distinct from the
  *  board column / status the human sets). */
-export type AgentStatus = "working" | "waiting" | "review" | "done" | "blocked" | "error";
+export type AgentStatus = "queued" | "working" | "waiting" | "review" | "done" | "blocked" | "error";
 
 /** A single entry in a ticket's comment thread. The agent posts its progress
  *  here; the human replies to give input. */
@@ -31,6 +31,8 @@ export interface Task {
   /** The agent's independent working status (only meaningful when assigned). */
   agentStatus?: AgentStatus;
   comments?: Comment[];
+  /** Ids of tasks that must be complete before this one runs. */
+  dependsOn?: string[];
 }
 
 export interface Column {
@@ -98,6 +100,7 @@ export function latestVersion(spec: Spec): SpecVersion {
 /** Display label + accent colour for an agent status. */
 export function agentStatusMeta(s: AgentStatus): { label: string; color: string } {
   switch (s) {
+    case "queued": return { label: "Queued", color: "#6b7280" };
     case "working": return { label: "Working", color: "#0a66c2" };
     case "waiting": return { label: "Needs input", color: "#c47f00" };
     case "review": return { label: "Needs review", color: "#8250df" };
