@@ -188,6 +188,7 @@ async fn cli_streamed<F, G>(
     prompt: &str,
     cwd: &Path,
     perm: Option<&str>,
+    allowed_tools: &[&str],
     handle: Option<&Arc<AgentHandle>>,
     mut on_progress: F,
     mut on_status: G,
@@ -206,6 +207,15 @@ where
     if let Some(p) = perm {
         // "acceptEdits" lets it edit files; "plan" makes it plan without editing.
         cmd.arg("--permission-mode").arg(p);
+    }
+    // Grant specific tools without prompting (e.g. "Bash" so the agent can build
+    // and run tests). Under acceptEdits, command tools are otherwise denied in
+    // headless mode.
+    if !allowed_tools.is_empty() {
+        cmd.arg("--allowedTools");
+        for t in allowed_tools {
+            cmd.arg(t);
+        }
     }
     if let Some(m) = model_arg() {
         cmd.arg("--model").arg(m);
@@ -387,7 +397,7 @@ where
         "{REVIEW_PROMPT}\n\n---\n\nReview this Java file ({path}) and return ONLY the JSON object.\n\n```java\n{}\n```",
         clip(code)
     );
-    let reply = cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, None, on_progress, |_| {}).await?;
+    let reply = cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, &[], None, on_progress, |_| {}).await?;
     let json = extract_json_object(&reply).context("no JSON object in reply")?;
     let raw: Value = serde_json::from_str(json).context("parsing review JSON")?;
     Ok(build_review(raw))
@@ -406,7 +416,7 @@ where
     F: FnMut(&str),
 {
     let prompt = format!("{EXPLAIN_PROMPT}\n\n---\n\nExplain this Java {label}:\n\n```java\n{}\n```", clip(code));
-    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, None, on_progress, |_| {}).await
+    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, &[], None, on_progress, |_| {}).await
 }
 
 pub async fn explain_via_api(api_key: &str, label: &str, code: &str) -> Result<String> {
@@ -422,7 +432,7 @@ where
         "{FIX_PROMPT}\n\n---\n\nCompiler error:\n{error}\n\nSource:\n```java\n{}\n```",
         clip(code)
     );
-    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, None, on_progress, |_| {}).await
+    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, &[], None, on_progress, |_| {}).await
 }
 
 pub async fn fix_via_api(api_key: &str, error: &str, code: &str) -> Result<String> {
@@ -443,7 +453,7 @@ where
     F: FnMut(&str),
 {
     let prompt = format!("{TASKS_PROMPT}\n\n---\n\n{}", tasks_user(description, columns));
-    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, None, on_progress, |_| {}).await
+    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, &[], None, on_progress, |_| {}).await
 }
 
 pub async fn tasks_via_api(api_key: &str, description: &str, columns: &[String]) -> Result<String> {
@@ -481,7 +491,7 @@ where
         prompt.push_str(&format!("\n{who}: {}\n", m.content));
     }
     prompt.push_str("\nAssistant:");
-    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, None, on_progress, |_| {}).await
+    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, &[], None, on_progress, |_| {}).await
 }
 
 /// Agentic chat: runs the CLI IN the project dir. When `plan_only`, it runs in
@@ -523,12 +533,12 @@ where
         prompt.push_str(&format!("\n{who}: {}\n", m.content));
     }
     let perm = if plan_only { "plan" } else { "acceptEdits" };
-    cli_streamed(cli, &prompt, root, Some(perm), Some(handle), on_progress, on_status).await
+    cli_streamed(cli, &prompt, root, Some(perm), &[], Some(handle), on_progress, on_status).await
 }
 
 // --- Task board: an agent works a single ticket ------------------------------
 
-const TASK_AGENT_PROMPT: &str = "You are an autonomous coding agent assigned a single task (ticket) on a Trello-style board in this Java project. Carry out the task using your tools to read and EDIT files directly — apply the changes yourself, do not just describe them. Keep edits minimal, focused, and idiomatic.\n\nThe brief may include \"Related tickets\" — sibling tasks from the same spec, with their findings and comment threads. These are shared context: BUILD ON them. If a completed ticket already located the relevant code, identified a file, or made a decision, take that as given and start from there — do NOT re-investigate or repeat work that a sibling ticket has already done. Only re-verify something if you have concrete reason to doubt it.\n\nEverything you write is posted as a COMMENT on the ticket for a human to read, so narrate your progress in clear, concise Markdown as you go. Cite files as `path:line`. The human can reply with their own comments; treat the most recent human comments as instructions or as answers to questions you asked.\n\nWork autonomously, but involve the human when it matters. When you STOP, the VERY LAST line of your reply MUST be exactly one of these control tokens, on its own line, with nothing after it:\n- `STATUS: DONE` — the task is fully complete.\n- `STATUS: NEEDS_INPUT` — you need information or a decision from the human before you can continue; ask your specific question(s) in the text above.\n- `STATUS: REVIEW` — you have made changes that a human should cross-check before this is considered done (use this for complex or risky work); summarize what to review.\n- `STATUS: BLOCKED` — you cannot proceed; explain why.\nChoose NEEDS_INPUT when you are genuinely stuck without an answer, and REVIEW when you have done the work but a human should verify it. Never invent facts to avoid asking.";
+const TASK_AGENT_PROMPT: &str = "You are an autonomous coding agent assigned a single task (ticket) on a Trello-style board in this Java project. Carry out the task using your tools to read and EDIT files directly — apply the changes yourself, do not just describe them. Keep edits minimal, focused, and idiomatic.\n\nThe brief may include \"Related tickets\" — sibling tasks from the same spec, with their findings and comment threads. These are shared context: BUILD ON them. If a completed ticket already located the relevant code, identified a file, or made a decision, take that as given and start from there — do NOT re-investigate or repeat work that a sibling ticket has already done. Only re-verify something if you have concrete reason to doubt it.\n\nVERIFY YOUR WORK by running commands yourself. You can run the build and tests (you have a shell). After you make changes, compile and run the RELEVANT tests to confirm the implementation actually works — prefer a targeted subset or the specific module over the whole suite when that is enough (e.g. `mvn -q test`, `mvn -pl <module> test`, `mvn -Dtest=SomeTest test`, or the Gradle equivalents). If the brief names specific tests or commands to run, run exactly those. Report the command you ran and its outcome (pass/fail, with the key failure lines) in your progress. If tests fail, iterate and fix, then re-run. Only report `STATUS: DONE` once the build and the tests you ran pass; if you cannot get them to pass, report `STATUS: BLOCKED` (or `STATUS: NEEDS_INPUT`) with the failing output. For complex or risky changes, run the tests and then use `STATUS: REVIEW` so a human can cross-check.\n\nEverything you write is posted as a COMMENT on the ticket for a human to read, so narrate your progress in clear, concise Markdown as you go. Cite files as `path:line`. The human can reply with their own comments; treat the most recent human comments as instructions or as answers to questions you asked.\n\nWork autonomously, but involve the human when it matters. When you STOP, the VERY LAST line of your reply MUST be exactly one of these control tokens, on its own line, with nothing after it:\n- `STATUS: DONE` — the task is fully complete.\n- `STATUS: NEEDS_INPUT` — you need information or a decision from the human before you can continue; ask your specific question(s) in the text above.\n- `STATUS: REVIEW` — you have made changes that a human should cross-check before this is considered done (use this for complex or risky work); summarize what to review.\n- `STATUS: BLOCKED` — you cannot proceed; explain why.\nChoose NEEDS_INPUT when you are genuinely stuck without an answer, and REVIEW when you have done the work but a human should verify it. Never invent facts to avoid asking.";
 
 fn task_prompt(task_context: &str, messages: &[ChatMsg]) -> String {
     let mut prompt = String::from(TASK_AGENT_PROMPT);
@@ -563,7 +573,7 @@ where
     G: FnMut(&str),
 {
     let prompt = task_prompt(task_context, messages);
-    cli_streamed(cli, &prompt, root, Some("acceptEdits"), Some(handle), on_progress, on_status).await
+    cli_streamed(cli, &prompt, root, Some("acceptEdits"), &["Bash"], Some(handle), on_progress, on_status).await
 }
 
 pub async fn chat_via_api(api_key: &str, context: Option<&str>, messages: &[ChatMsg]) -> Result<String> {
