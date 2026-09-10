@@ -10,6 +10,7 @@ import {
   gitCommitFiles,
   gitCreateBranch,
   gitReset,
+  gitResolve,
   gitRevert,
   gitLog,
   gitStage,
@@ -28,13 +29,15 @@ interface Props {
   onOpenDiff: (hash: string, relPath: string) => void;
   /** Open the working-tree diff for a repo-relative file path as an editor tab. */
   onOpenWorkingDiff: (relPath: string) => void;
+  /** Open the actual working file (for manual conflict resolution). */
+  onOpenFile: (relPath: string) => void;
 }
 
 type Sub = "history" | "changes" | "stage" | "branches";
 
 /** The bottom-panel Git tab: an icon rail on the left switching between commit
  *  history, the current working-tree changes, and a branch graph. */
-export default function GitView({ root, onOpenDiff, onOpenWorkingDiff }: Props) {
+export default function GitView({ root, onOpenDiff, onOpenWorkingDiff, onOpenFile }: Props) {
   const [sub, setSub] = useState<Sub>("history");
   return (
     <div className="flex h-full min-h-0">
@@ -46,7 +49,7 @@ export default function GitView({ root, onOpenDiff, onOpenWorkingDiff }: Props) 
       </nav>
       <div className="min-w-0 flex-1">
         {sub === "history" && <CommitHistory root={root} onOpenDiff={onOpenDiff} />}
-        {sub === "changes" && <CurrentChanges root={root} onOpenDiff={onOpenWorkingDiff} />}
+        {sub === "changes" && <CurrentChanges root={root} onOpenDiff={onOpenWorkingDiff} onOpenFile={onOpenFile} />}
         {sub === "stage" && <StagePanel root={root} onOpenDiff={onOpenWorkingDiff} />}
         {sub === "branches" && <BranchGraph root={root} />}
       </div>
@@ -286,13 +289,24 @@ function FolderMini() {
 
 // --- Current changes --------------------------------------------------------
 
-function CurrentChanges({ root, onOpenDiff }: { root: string; onOpenDiff: (relPath: string) => void }) {
+/** Porcelain XY codes that mark an unmerged (conflicted) path. */
+const CONFLICT_CODES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+function isConflict(c: GitChange): boolean {
+  return CONFLICT_CODES.has(`${c.staged}${c.unstaged}`);
+}
+/** Human phrasing of the two conflict sides for a given XY code. */
+function conflictKind(c: GitChange): string {
+  return { DD: "both deleted", AU: "added by us", UD: "deleted by them", UA: "added by them", DU: "deleted by us", AA: "both added", UU: "both modified" }[`${c.staged}${c.unstaged}`] ?? "conflict";
+}
+
+function CurrentChanges({ root, onOpenDiff, onOpenFile }: { root: string; onOpenDiff: (relPath: string) => void; onOpenFile: (relPath: string) => void }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["git-status", root],
     queryFn: () => gitStatus(root),
     refetchInterval: 3000,
   });
+  const [resolving, setResolving] = useState<GitChange | null>(null);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["git-status", root] });
   const stage = async (paths: string[]) => { try { await gitStage(root, paths); refresh(); } catch (e) { alert(String(e)); } };
@@ -301,20 +315,132 @@ function CurrentChanges({ root, onOpenDiff }: { root: string; onOpenDiff: (relPa
   if (isLoading) return <Center>Loading changes…</Center>;
   if (!data || data.length === 0) return <Center>Working tree clean.</Center>;
 
-  const staged = data.filter((c) => c.staged !== " " && c.staged !== "?");
-  const unstaged = data.filter((c) => c.unstaged !== " " && c.unstaged !== "?");
-  const untracked = data.filter((c) => c.staged === "?");
+  const conflicts = data.filter(isConflict);
+  const rest = data.filter((c) => !isConflict(c));
+  const staged = rest.filter((c) => c.staged !== " " && c.staged !== "?");
+  const unstaged = rest.filter((c) => c.unstaged !== " " && c.unstaged !== "?");
+  const untracked = rest.filter((c) => c.staged === "?");
   const unstagedAll = [...unstaged, ...untracked].map((c) => c.path);
 
   return (
     <div className="h-full overflow-auto py-1">
+      {conflicts.length > 0 && (
+        <ConflictGroup
+          items={conflicts}
+          onOpen={onOpenFile}
+          onResolve={(c) => setResolving(c)}
+        />
+      )}
       <ChangeGroup title="Staged" items={staged} pick={(c) => c.staged} onOpen={onOpenDiff} action="unstage" onAction={(p) => unstage([p])}
         bulk={staged.length ? { label: "Unstage all", run: () => unstage(staged.map((c) => c.path)) } : undefined} />
       <ChangeGroup title="Changes" items={unstaged} pick={(c) => c.unstaged} onOpen={onOpenDiff} action="stage" onAction={(p) => stage([p])} />
       <ChangeGroup title="Untracked" items={untracked} pick={() => "?"} onOpen={onOpenDiff} action="stage" onAction={(p) => stage([p])}
         bulk={unstagedAll.length ? { label: "Stage all", run: () => stage(unstagedAll) } : undefined} />
+
+      {resolving && (
+        <ConflictResolver
+          root={root}
+          change={resolving}
+          onOpenFile={onOpenFile}
+          onDone={() => { setResolving(null); refresh(); }}
+          onClose={() => setResolving(null)}
+        />
+      )}
     </div>
   );
+}
+
+/** The conflicted-files group: red entries, each with a Resolve button. */
+function ConflictGroup({ items, onOpen, onResolve }: { items: GitChange[]; onOpen: (path: string) => void; onResolve: (c: GitChange) => void }) {
+  return (
+    <div className="mb-1">
+      <div className="flex items-center px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-red-600">
+        <ConflictIcon />
+        <span className="ml-1">Conflicts <span className="tabular-nums">({items.length})</span></span>
+      </div>
+      {items.map((c) => (
+        <div key={`conflict-${c.path}`} className="group flex w-full items-center bg-red-500/5 hover:bg-red-500/10">
+          <button onClick={() => onOpen(c.path)} title="Open file to resolve" className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1 text-left">
+            <span className="grid h-4 w-4 shrink-0 place-items-center rounded bg-red-500/20 text-[10px] font-bold text-red-600">!</span>
+            <span className="min-w-0 flex-1 truncate text-[12px]">
+              <span className="text-red-500/70">{dir(c.path)}</span>
+              <span className="font-medium text-red-600">{base(c.path)}</span>
+              <span className="ml-1.5 text-[10.5px] font-normal text-red-500/70">{conflictKind(c)}</span>
+            </span>
+          </button>
+          <button
+            onClick={() => onResolve(c)}
+            className="mr-2 shrink-0 rounded bg-red-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-red-600 hover:bg-red-500/25"
+          >
+            Resolve
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A small dialog offering ways to resolve one conflicted file. */
+function ConflictResolver({ root, change, onOpenFile, onDone, onClose }: {
+  root: string;
+  change: GitChange;
+  onOpenFile: (relPath: string) => void;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const take = async (side: "ours" | "theirs") => {
+    setBusy(side); setErr(null);
+    try { await gitResolve(root, change.path, side); onDone(); }
+    catch (e) { setErr(String(e)); setBusy(null); }
+  };
+  const markResolved = async () => {
+    setBusy("mark"); setErr(null);
+    try { await gitStage(root, [change.path]); onDone(); }
+    catch (e) { setErr(String(e)); setBusy(null); }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-6" onClick={onClose}>
+      <div className="switch-dialog w-[440px] max-w-full rounded-xl p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
+          <ConflictIcon /> Resolve conflict
+        </div>
+        <p className="mb-3 break-all text-[11.5px] text-[var(--text-tertiary)]">{change.path} · {conflictKind(change)}</p>
+
+        <div className="flex flex-col gap-2">
+          <ResolveOption
+            title="Edit manually"
+            detail="Open the file and resolve the <<<<<<< / ======= / >>>>>>> markers yourself, then Mark resolved."
+            onClick={() => { onOpenFile(change.path); onClose(); }}
+          />
+          <ResolveOption title="Use current (ours)" detail="Keep this branch's version and discard the incoming changes for this file." busy={busy === "ours"} onClick={() => void take("ours")} />
+          <ResolveOption title="Use incoming (theirs)" detail="Take the incoming version and discard this branch's changes for this file." busy={busy === "theirs"} onClick={() => void take("theirs")} />
+          <ResolveOption title="Mark resolved" detail="Stage the file as-is (after you've edited it) to clear the conflict." busy={busy === "mark"} onClick={() => void markResolved()} />
+        </div>
+
+        {err && <p className="mt-3 text-[11px] text-red-600">{err}</p>}
+        <div className="mt-3 flex justify-end">
+          <button onClick={onClose} className="btn-bezel px-3 py-1.5 text-[12px]">Close</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ResolveOption({ title, detail, busy, onClick }: { title: string; detail: string; busy?: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} disabled={busy} className="rounded-lg border border-[color:var(--line)] bg-[var(--control-bg)] p-2.5 text-left hover:border-[color:var(--accent-soft)] disabled:opacity-50">
+      <div className="text-[12.5px] font-medium text-[var(--text-primary)]">{busy ? "Working…" : title}</div>
+      <div className="mt-0.5 text-[11px] leading-snug text-[var(--text-tertiary)]">{detail}</div>
+    </button>
+  );
+}
+
+function ConflictIcon() {
+  return <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-red-600"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>;
 }
 
 function ChangeGroup({

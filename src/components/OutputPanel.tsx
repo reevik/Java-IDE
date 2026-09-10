@@ -49,6 +49,8 @@ interface Props {
   onOpenDiff: (hash: string, relPath: string) => void;
   /** Open the working-tree diff for a file as an editor tab. */
   onOpenWorkingDiff: (relPath: string) => void;
+  /** Open a repo-relative working file (for manual conflict resolution). */
+  onOpenRepoFile: (relPath: string) => void;
   /** Send the current console output to the AI Assistant for analysis. */
   onAnalyze?: (text: string) => void;
 }
@@ -72,6 +74,7 @@ export default function OutputPanel({
   gitRoot,
   onOpenDiff,
   onOpenWorkingDiff,
+  onOpenRepoFile,
   onAnalyze,
 }: Props) {
   const outRef = useRef<HTMLDivElement>(null);
@@ -175,7 +178,7 @@ export default function OutputPanel({
       {tab === "git" ? (
         <div className="min-h-0 flex-1">
           {gitRoot ? (
-            <GitView root={gitRoot} onOpenDiff={onOpenDiff} onOpenWorkingDiff={onOpenWorkingDiff} />
+            <GitView root={gitRoot} onOpenDiff={onOpenDiff} onOpenWorkingDiff={onOpenWorkingDiff} onOpenFile={onOpenRepoFile} />
           ) : (
             <p className="px-3 py-6 text-center text-[12px] text-[var(--text-tertiary)]">Open a project to see git history.</p>
           )}

@@ -291,6 +291,12 @@ export function gitUnstage(root: string, paths: string[]): Promise<void> {
   return invoke("git_unstage", { root, paths });
 }
 
+/** Resolve a merge conflict for one file by taking one side, then staging it.
+ *  `side` is "ours" (current branch) or "theirs" (incoming). */
+export function gitResolve(root: string, path: string, side: "ours" | "theirs"): Promise<void> {
+  return invoke("git_resolve", { root, path, side });
+}
+
 /** Commit the currently-staged changes; returns git's summary line. */
 export function gitCommit(root: string, message: string): Promise<string> {
   return invoke("git_commit", { root, message });

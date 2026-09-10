@@ -1515,6 +1515,23 @@ pub fn git_reset(root: String, hash: String, mode: String, state: State<'_, AppS
     git_out(&r, &["reset", flag, &hash])
 }
 
+/// Resolve a merge conflict for one file by taking one side, then staging it so
+/// git considers it resolved. `side` is "ours" (current branch) or "theirs"
+/// (incoming). Manual resolution is done by editing the file and staging it.
+#[tauri::command]
+pub fn git_resolve(root: String, path: String, side: String, state: State<'_, AppState>) -> Result<(), String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    let flag = match side.as_str() {
+        "ours" => "--ours",
+        "theirs" => "--theirs",
+        other => return Err(format!("unknown conflict side '{other}'")),
+    };
+    git_out(&r, &["checkout", flag, "--", &path])?;
+    git_out(&r, &["add", "--", &path])?;
+    Ok(())
+}
+
 /// A path with a pending change in the working tree / index.
 #[derive(serde::Serialize)]
 pub struct GitChange {

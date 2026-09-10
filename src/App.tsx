@@ -1829,6 +1829,7 @@ export default function App() {
                   gitRoot={project.path}
                   onOpenDiff={openDiff}
                   onOpenWorkingDiff={openWorkingDiff}
+                  onOpenRepoFile={(rel) => openFile(`${project.path}/${rel}`)}
                   onAnalyze={(text) => {
                     setRightPanel("chat");
                     const prompt = `Analyze this build/run output from the project and explain what happened. If there are errors, identify the root cause and suggest concrete fixes; if it succeeded, summarize briefly.\n\n\`\`\`\n${text}\n\`\`\``;
