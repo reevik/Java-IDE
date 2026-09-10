@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Markdown from "./Markdown";
 import { agentStatusMeta, type Comment, type Task } from "../lib/taskBoards";
 
 interface Props {
@@ -130,7 +131,11 @@ export default function TaskDetailDialog({
                   <Spinner />
                   {live.activity && <span className="text-[var(--text-tertiary)]">{live.activity}</span>}
                 </div>
-                <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-[var(--text-secondary)]">{live.text || "Thinking…"}</p>
+                {live.text ? (
+                  <div className="md-comment text-[12px] leading-relaxed text-[var(--text-secondary)]"><Markdown text={live.text} /></div>
+                ) : (
+                  <p className="text-[12px] italic text-[var(--text-tertiary)]">Thinking…</p>
+                )}
               </div>
             )}
           </div>
@@ -164,7 +169,7 @@ function CommentView({ c }: { c: Comment }) {
         {agent ? <><RobotIcon small /> <span className="text-[var(--accent-strong,#0a66c2)]">Agent</span></> : <><UserIcon /> <span className="text-[var(--text-secondary)]">You</span></>}
         <span className="font-normal text-[var(--text-tertiary)]">{time(c.at)}</span>
       </div>
-      <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-[var(--text-primary)]">{c.text}</p>
+      <div className="md-comment text-[12px] leading-relaxed text-[var(--text-primary)]"><Markdown text={c.text} /></div>
     </div>
   );
 }
