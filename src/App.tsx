@@ -50,6 +50,8 @@ import {
   createDir,
   createFile,
   deletePath,
+  movePaths,
+  copyPaths,
   debuggerAdapter,
   gitFileDiff,
   gitWorkingDiff,
@@ -1004,6 +1006,46 @@ export default function App() {
     [qc, project?.path, closeTab],
   );
 
+  // Move files/dirs into a target directory, then remap any open tabs whose
+  // paths changed and refresh the tree.
+  const moveInTree = useCallback(
+    async (paths: string[], dir: string) => {
+      const news = await movePaths(paths, dir);
+      const map = new Map<string, string>();
+      paths.forEach((p, i) => { if (news[i]) map.set(p, news[i]); });
+      const remap = (fp: string): string | null => {
+        for (const [oldP, newP] of map) {
+          if (fp === oldP) return newP;
+          if (fp.startsWith(oldP + "/")) return newP + fp.slice(oldP.length);
+        }
+        return null;
+      };
+      setFiles((prev) => {
+        const next = prev.map((f) => {
+          const np = remap(f.path);
+          return np ? { ...f, path: np, name: basename(np) } : f;
+        });
+        filesRef.current = next;
+        return next;
+      });
+      setActivePath((p) => (p ? remap(p) ?? p : p));
+      setSecActive((p) => (p ? remap(p) ?? p : p));
+      await qc.invalidateQueries({ queryKey: ["tree", project?.path] });
+      qc.invalidateQueries({ queryKey: ["modules", project?.path] });
+    },
+    [qc, project?.path],
+  );
+
+  // Copy files/dirs into a target directory, then refresh the tree.
+  const copyInTree = useCallback(
+    async (paths: string[], dir: string) => {
+      await copyPaths(paths, dir);
+      await qc.invalidateQueries({ queryKey: ["tree", project?.path] });
+      qc.invalidateQueries({ queryKey: ["modules", project?.path] });
+    },
+    [qc, project?.path],
+  );
+
   // Reformat the active Java file in place with the selected code style.
   const reformatActive = useCallback(async () => {
     const path = activeGroupRef.current === 1 ? secActiveRef.current : activeRef.current;
@@ -1708,6 +1750,8 @@ export default function App() {
                     onOpen={openFile}
                     onCreate={createInTree}
                     onDelete={deleteInTree}
+                    onMove={moveInTree}
+                    onCopy={copyInTree}
                     onOpenStructure={() => setStructureOpen(true)}
                   />
                 ) : leftTab === "modules" ? (

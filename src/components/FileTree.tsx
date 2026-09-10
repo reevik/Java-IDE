@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { TreeNode } from "../lib/types";
 import { isPackageRoot, relOf, type RootKind, type SourceRoots } from "../lib/sourceRoots";
 
@@ -50,6 +50,10 @@ interface Props {
   onCreate: (dir: string, name: string, kind: NewKind) => Promise<void>;
   /** Delete the given paths; throws with a message on failure. */
   onDelete: (paths: string[]) => Promise<void>;
+  /** Move the given paths into `dir`; throws with a message on failure. */
+  onMove: (paths: string[], dir: string) => Promise<void>;
+  /** Copy the given paths into `dir`; throws with a message on failure. */
+  onCopy: (paths: string[], dir: string) => Promise<void>;
   /** Open the Project Structure dialog (mark source/resource/test roots). */
   onOpenStructure: () => void;
 }
@@ -128,7 +132,7 @@ const PROMPT: Record<NewKind, { title: string; placeholder: string; hint?: strin
 
 interface Menu { x: number; y: number; dir: string; targets: string[] }
 
-export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onOpenStructure }: Props) {
+export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onMove, onCopy, onOpenStructure }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(rootPath));
   // Restore the saved expand/collapse state when switching projects.
   useEffect(() => setCollapsed(loadCollapsed(rootPath)), [rootPath]);
@@ -136,6 +140,7 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
   const writeCollapsed = (next: Set<string>) => { setCollapsed(next); saveCollapsed(rootPath, next); };
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [clip, setClip] = useState<{ mode: "cut" | "copy"; paths: string[] } | null>(null);
   const [prompt, setPrompt] = useState<{ dir: string; kind: NewKind } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
   const [name, setName] = useState("");
@@ -247,6 +252,54 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
     setMenu(null);
   };
 
+  const cutCopy = (mode: "cut" | "copy") => {
+    if (!menu || menu.targets.length === 0) return;
+    setClip({ mode, paths: menu.targets });
+    setMenu(null);
+  };
+
+  // Move/copy `paths` into `dir` (from paste or drag-and-drop). Skips no-ops
+  // (already in `dir`) and refuses to drop a folder into its own descendant.
+  const dropInto = async (paths: string[], dir: string, mode: "cut" | "copy") => {
+    const moving = paths.filter((p) => p !== dir && parentDir(p) !== dir && !dir.startsWith(`${p}/`));
+    if (moving.length === 0) return;
+    try {
+      if (mode === "cut") await onMove(moving, dir);
+      else await onCopy(moving, dir);
+      const next = new Set(collapsed);
+      next.delete(dir);
+      writeCollapsed(next);
+      setSel(new Set());
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  // Drag-and-drop: the paths being dragged (set on dragstart, read on drop).
+  const dragPathsRef = useRef<string[]>([]);
+  const beginDrag = (node: TreeNode): string[] => {
+    const paths = sel.has(node.path) && sel.size > 0 ? [...sel] : [node.path];
+    dragPathsRef.current = paths;
+    return paths;
+  };
+  const canDropInto = (dir: string): boolean =>
+    dragPathsRef.current.length > 0 &&
+    dragPathsRef.current.every((p) => p !== dir && parentDir(p) !== dir && !dir.startsWith(`${p}/`));
+  const dropOnDir = (dir: string, copy: boolean) => {
+    const paths = dragPathsRef.current;
+    dragPathsRef.current = [];
+    if (paths.length) void dropInto(paths, dir, copy ? "copy" : "cut");
+  };
+
+  const paste = async () => {
+    if (!menu || !clip) return;
+    const dir = menu.dir;
+    const { mode, paths } = clip;
+    setMenu(null);
+    if (mode === "cut") setClip(null);
+    await dropInto(paths, dir, mode);
+  };
+
   const submit = async () => {
     if (!prompt || busy) return;
     const n = name.trim();
@@ -312,6 +365,8 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
             setConfirmDelete([...sel]);
           }
         }}
+        onDragOver={(e) => { if (canDropInto(rootPath)) e.preventDefault(); }}
+        onDrop={(e) => { if (canDropInto(rootPath)) { e.preventDefault(); dropOnDir(rootPath, e.altKey); } }}
         className="min-h-0 flex-1 select-none overflow-auto pb-3 pl-2 pr-0.5 outline-none [scrollbar-gutter:stable]"
       >
         {loading && shown.length === 0 ? (
@@ -333,6 +388,9 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
                 problemPaths={problemPaths}
                 onClickRow={onRowClick}
                 onContext={openMenu}
+                onBeginDrag={beginDrag}
+                onDropOnDir={dropOnDir}
+                canDropInto={canDropInto}
               />
             ))}
             {shown.length === 0 && (
@@ -370,6 +428,26 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
                 {m.label}
               </button>
             ))}
+            {(menu.targets.length > 0 || clip) && (
+              <>
+                <div className="my-1 h-px bg-[var(--surface-2)]" />
+                {menu.targets.length > 0 && (
+                  <>
+                    <button onClick={() => cutCopy("cut")} className="context-item">
+                      {menu.targets.length > 1 ? `Cut ${menu.targets.length} items` : "Cut"}
+                    </button>
+                    <button onClick={() => cutCopy("copy")} className="context-item">
+                      {menu.targets.length > 1 ? `Copy ${menu.targets.length} items` : "Copy"}
+                    </button>
+                  </>
+                )}
+                {clip && (
+                  <button onClick={() => void paste()} className="context-item">
+                    Paste{clip.paths.length > 1 ? ` ${clip.paths.length} items` : ""} into {basename(menu.dir)}
+                  </button>
+                )}
+              </>
+            )}
             {menu.targets.length > 0 && (
               <>
                 <div className="my-1 h-px bg-[var(--surface-2)]" />
@@ -470,6 +548,9 @@ function Row({
   problemPaths,
   onClickRow,
   onContext,
+  onBeginDrag,
+  onDropOnDir,
+  canDropInto,
 }: {
   node: UiNode;
   depth: number;
@@ -481,12 +562,18 @@ function Row({
   problemPaths: Set<string>;
   onClickRow: (e: React.MouseEvent, node: TreeNode) => void;
   onContext: (e: React.MouseEvent, node: TreeNode) => void;
+  onBeginDrag: (node: TreeNode) => string[];
+  onDropOnDir: (dir: string, copy: boolean) => void;
+  canDropInto: (dir: string) => boolean;
 }) {
   const isDir = node.kind === "dir";
   const open = isDir && (forceOpen || !collapsed.has(node.path));
   const selected = sel.has(node.path);
   const active = selected || (sel.size === 0 && selectedPath === node.path);
   const hasProblem = problemPaths.has(node.path);
+  const [dropOver, setDropOver] = useState(false);
+  // A row's drop target: a folder drops into itself, a file into its parent.
+  const dropDir = isDir ? node.path : parentDir(node.path);
 
   // Cluster rendering: a contiguous run of selected rows draws as one shape.
   const edge = clusterEdges.get(node.path);
@@ -499,10 +586,15 @@ function Row({
   return (
     <>
       <div
+        draggable
+        onDragStart={(e) => { const paths = onBeginDrag(node); e.dataTransfer.effectAllowed = "copyMove"; try { e.dataTransfer.setData("text/plain", paths.join("\n")); } catch { /* ignore */ } }}
+        onDragOver={(e) => { if (canDropInto(dropDir)) { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? "copy" : "move"; if (!dropOver) setDropOver(true); } }}
+        onDragLeave={() => dropOver && setDropOver(false)}
+        onDrop={(e) => { if (canDropInto(dropDir)) { e.preventDefault(); e.stopPropagation(); setDropOver(false); onDropOnDir(dropDir, e.altKey); } }}
         onClick={(e) => onClickRow(e, node)}
         onContextMenu={(e) => onContext(e, node)}
         style={{ paddingLeft: 6 + depth * 12 }}
-        className={`nav-row flex items-center gap-1.5 py-[3px] pr-1.5 text-[12.5px] ${activeCls}`}
+        className={`nav-row flex items-center gap-1.5 py-[3px] pr-1.5 text-[12.5px] ${activeCls} ${dropOver ? "nav-row-drop" : ""}`}
       >
         {isDir ? <Chevron open={open} /> : <span className="w-3 shrink-0" />}
         {node.rootKind ? <RootIcon kind={node.rootKind} /> : node.isPackage ? <PackageIcon /> : <FileIcon name={node.name} isDir={isDir} />}
@@ -529,6 +621,9 @@ function Row({
             problemPaths={problemPaths}
             onClickRow={onClickRow}
             onContext={onContext}
+            onBeginDrag={onBeginDrag}
+            onDropOnDir={onDropOnDir}
+            canDropInto={canDropInto}
           />
         ))}
     </>

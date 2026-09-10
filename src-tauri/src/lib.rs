@@ -376,6 +376,8 @@ pub fn run() {
             commands::create_dir,
             commands::rename_path,
             commands::delete_path,
+            commands::move_paths,
+            commands::copy_paths,
             commands::cargo_run,
             commands::run_maven_goals,
             commands::cargo_cancel,

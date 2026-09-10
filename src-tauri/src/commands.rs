@@ -1138,6 +1138,37 @@ pub fn delete_path(path: String, state: State<'_, AppState>) -> Result<(), Strin
     fs_tree::delete(&p).map_err(|e| e.to_string())
 }
 
+/// Move each path in `paths` into directory `dir`. Returns the new paths, in the
+/// same order as the inputs (so the caller can remap open tabs).
+#[tauri::command]
+pub fn move_paths(paths: Vec<String>, dir: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let d = PathBuf::from(&dir);
+    ensure_within_projects(&d, &state)?;
+    let mut out = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let s = PathBuf::from(p);
+        ensure_within_projects(&s, &state)?;
+        let t = fs_tree::move_into(&s, &d).map_err(|e| e.to_string())?;
+        out.push(t.to_string_lossy().into_owned());
+    }
+    Ok(out)
+}
+
+/// Copy each path in `paths` into directory `dir`. Returns the new paths.
+#[tauri::command]
+pub fn copy_paths(paths: Vec<String>, dir: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let d = PathBuf::from(&dir);
+    ensure_within_projects(&d, &state)?;
+    let mut out = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let s = PathBuf::from(p);
+        ensure_within_projects(&s, &state)?;
+        let t = fs_tree::copy_into(&s, &d).map_err(|e| e.to_string())?;
+        out.push(t.to_string_lossy().into_owned());
+    }
+    Ok(out)
+}
+
 /// The current git branch of `root` (reading `.git/HEAD` directly — no git dep).
 /// Returns a short SHA for a detached HEAD, or null when not a git repo.
 #[tauri::command]

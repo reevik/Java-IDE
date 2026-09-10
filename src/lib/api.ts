@@ -147,6 +147,16 @@ export function deletePath(path: string): Promise<void> {
   return invoke("delete_path", { path });
 }
 
+/** Move the given paths into `dir`. Returns the new paths, aligned with inputs. */
+export function movePaths(paths: string[], dir: string): Promise<string[]> {
+  return invoke("move_paths", { paths, dir });
+}
+
+/** Copy the given paths into `dir` (name auto-uniquified on collision). */
+export function copyPaths(paths: string[], dir: string): Promise<string[]> {
+  return invoke("copy_paths", { paths, dir });
+}
+
 // --- Cargo ---
 
 /** Starts a cargo command; progress arrives as `cargo:event` events. */

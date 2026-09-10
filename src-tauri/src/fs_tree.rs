@@ -130,6 +130,82 @@ pub fn delete(path: &Path) -> Result<()> {
     .with_context(|| format!("deleting {}", path.display()))
 }
 
+/// Move `src` into directory `dst_dir`, keeping its base name. Refuses to move a
+/// directory into itself or a descendant, or to overwrite an existing entry.
+pub fn move_into(src: &Path, dst_dir: &Path) -> Result<PathBuf> {
+    if !dst_dir.is_dir() {
+        bail!("{} is not a directory", dst_dir.display());
+    }
+    let name = src.file_name().context("source has no file name")?;
+    let target = dst_dir.join(name);
+    if target == src {
+        return Ok(target); // already there — no-op
+    }
+    if src.is_dir() && target.starts_with(src) {
+        bail!("cannot move a folder into itself");
+    }
+    if target.exists() {
+        bail!("{} already exists", target.display());
+    }
+    std::fs::rename(src, &target).with_context(|| format!("moving {}", src.display()))?;
+    Ok(target)
+}
+
+/// Copy `src` into directory `dst_dir`, auto-uniquifying the name on collision
+/// (`Foo.java` → `Foo copy.java` → `Foo copy 2.java`).
+pub fn copy_into(src: &Path, dst_dir: &Path) -> Result<PathBuf> {
+    if !dst_dir.is_dir() {
+        bail!("{} is not a directory", dst_dir.display());
+    }
+    let name = src.file_name().and_then(|n| n.to_str()).context("source has no file name")?;
+    if src.is_dir() && dst_dir.starts_with(src) {
+        bail!("cannot copy a folder into itself");
+    }
+    let target = unique_in(dst_dir, name);
+    if src.is_dir() {
+        copy_dir_all(src, &target)?;
+    } else {
+        std::fs::copy(src, &target).with_context(|| format!("copying {}", src.display()))?;
+    }
+    Ok(target)
+}
+
+/// A path in `dir` for `name` that doesn't collide, inserting " copy" (then
+/// " copy 2", …) before the extension.
+fn unique_in(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name.to_string(), String::new()),
+    };
+    for n in 1.. {
+        let suffix = if n == 1 { " copy".to_string() } else { format!(" copy {n}") };
+        let cand = dir.join(format!("{stem}{suffix}{ext}"));
+        if !cand.exists() {
+            return cand;
+        }
+    }
+    unreachable!()
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst).with_context(|| format!("creating {}", dst.display()))?;
+    for entry in std::fs::read_dir(src).with_context(|| format!("reading {}", src.display()))?.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let to = dst.join(&name);
+        if path.is_dir() {
+            copy_dir_all(&path, &to)?;
+        } else {
+            std::fs::copy(&path, &to).with_context(|| format!("copying {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
 fn sanitize(name: &str) -> Result<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
