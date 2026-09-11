@@ -2074,6 +2074,79 @@ pub fn set_preferred_connector(id: Option<String>) {
     llm::set_preferred(id);
 }
 
+/// An agent skill (a `SKILL.md` directory) for the Skills panel.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Skill {
+    /// Absolute path of the skill directory (stable id).
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// "user" | "project" | "external"
+    pub source: String,
+}
+
+/// Read a SKILL.md's frontmatter `name` / `description` (falling back to the
+/// directory name).
+fn parse_skill_md(md: &Path, dir: &Path) -> (String, String) {
+    let content = std::fs::read_to_string(md).unwrap_or_default();
+    let mut name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("skill").to_string();
+    let mut desc = String::new();
+    if let Some(rest) = content.strip_prefix("---") {
+        if let Some(end) = rest.find("\n---") {
+            for line in rest[..end].lines() {
+                let clean = |v: &str| v.trim().trim_matches('"').trim_matches('\'').to_string();
+                if let Some(v) = line.strip_prefix("name:") {
+                    name = clean(v);
+                } else if let Some(v) = line.strip_prefix("description:") {
+                    desc = clean(v);
+                }
+            }
+        }
+    }
+    (name, desc)
+}
+
+/// Scan a `skills` directory: every immediate subdirectory that has a SKILL.md.
+fn scan_skills_dir(dir: &Path, source: &str, out: &mut Vec<Skill>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        let md = p.join("SKILL.md");
+        if p.is_dir() && md.exists() {
+            let (name, description) = parse_skill_md(&md, &p);
+            out.push(Skill { id: p.to_string_lossy().into_owned(), name, description, source: source.into() });
+        }
+    }
+}
+
+/// List agent skills: the user's `~/.claude/skills`, the project's
+/// `.claude/skills`, and any external skill folders the user added. An external
+/// folder may itself be a single skill (has SKILL.md) or a folder of skills.
+#[tauri::command]
+pub fn list_skills(root: Option<String>, extra_dirs: Vec<String>) -> Vec<Skill> {
+    let mut out: Vec<Skill> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        scan_skills_dir(&PathBuf::from(home).join(".claude/skills"), "user", &mut out);
+    }
+    if let Some(r) = root.filter(|s| !s.is_empty()) {
+        scan_skills_dir(&PathBuf::from(&r).join(".claude/skills"), "project", &mut out);
+    }
+    for d in &extra_dirs {
+        let p = PathBuf::from(d);
+        if p.join("SKILL.md").exists() {
+            let (name, description) = parse_skill_md(&p.join("SKILL.md"), &p);
+            out.push(Skill { id: p.to_string_lossy().into_owned(), name, description, source: "external".into() });
+        } else {
+            scan_skills_dir(&p, "external", &mut out);
+        }
+    }
+    // De-duplicate by path (an external folder could overlap .claude).
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|s| seen.insert(s.id.clone()));
+    out
+}
+
 #[tauri::command]
 pub fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()

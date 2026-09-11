@@ -354,6 +354,7 @@ pub fn run() {
             commands::ai_settings,
             commands::detect_ai_connectors,
             commands::set_preferred_connector,
+            commands::list_skills,
             commands::app_version,
             commands::set_window_theme,
             commands::tool_paths,

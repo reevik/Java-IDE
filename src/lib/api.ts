@@ -358,6 +358,19 @@ export function setPreferredConnector(id: string | null): Promise<void> {
   return invoke("set_preferred_connector", { id });
 }
 
+/** An agent skill (a SKILL.md directory). */
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  source: "user" | "project" | "external";
+}
+
+/** List skills from ~/.claude/skills, <root>/.claude/skills, and extra folders. */
+export function listSkills(root: string | null, extraDirs: string[]): Promise<Skill[]> {
+  return invoke("list_skills", { root, extraDirs });
+}
+
 export function appVersion(): Promise<string> {
   return invoke("app_version");
 }
