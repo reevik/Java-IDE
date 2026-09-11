@@ -39,7 +39,7 @@ type Sub = "history" | "changes" | "stage" | "branches";
 /** The bottom-panel Git tab: an icon rail on the left switching between commit
  *  history, the current working-tree changes, and a branch graph. */
 export default function GitView({ root, onOpenDiff, onOpenWorkingDiff, onOpenFile }: Props) {
-  const [sub, setSub] = useState<Sub>("history");
+  const [sub, setSub] = useState<Sub>("changes");
   return (
     <div className="flex h-full min-h-0">
       <nav className="flex w-[64px] shrink-0 flex-col gap-1 border-r border-[color:var(--line)] py-2">
