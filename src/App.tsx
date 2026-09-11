@@ -1497,6 +1497,7 @@ export default function App() {
       { id: "debug.toggle-all-breakpoints", group: "Debug", title: bpAnyEnabled ? "Disable All Breakpoints" : "Enable All Breakpoints", disabled: bpCount === 0, disabledReason: "No breakpoints", run: () => setAllBreakpointsEnabled(!bpAnyEnabled) },
       { id: "debug.remove-all-breakpoints", group: "Debug", title: "Remove All Breakpoints", disabled: bpCount === 0, disabledReason: "No breakpoints", run: () => removeAllBreakpoints() },
       { id: "code.goto-line", group: "Code", title: "Go to Line…", hint: "⌃G", disabled: !active, disabledReason: "Open a file", run: () => setGotoLine(true) },
+      { id: "code.refactor", group: "Code", title: "Refactoring: Refactor This…", hint: "⌃T", disabled: !active || active.readOnly || !active.path.endsWith(".java"), disabledReason: "Open a Java file", run: () => activeEditor()?.openRefactor() },
       { id: "code.fold", group: "Code", title: "Fold at Cursor", hint: "⌘⌥[", disabled: foldDisabled, disabledReason: "Open a code file", run: () => activeEditor()?.foldAtCursor() },
       { id: "code.unfold", group: "Code", title: "Unfold at Cursor", hint: "⌘⌥]", disabled: foldDisabled, disabledReason: "Open a code file", run: () => activeEditor()?.unfoldAtCursor() },
       { id: "code.fold-all", group: "Code", title: "Fold All", disabled: foldDisabled, disabledReason: "Open a code file", run: () => activeEditor()?.foldAll() },
@@ -1630,6 +1631,7 @@ export default function App() {
         onRunSymbol={(run, x, y, menu) => (menu ? setRunMenu({ run, path: f.path, x, y }) : runSymbol(run, f.path))}
         onFindUsages={showUsages}
         onRename={applyRename}
+        onRefactorError={(msg) => window.alert(msg)}
         agentActive={agentActive}
         onStaged={() => {
           qc.invalidateQueries({ queryKey: ["git-status"] });

@@ -402,6 +402,8 @@ pub fn run() {
             commands::lsp_references,
             commands::lsp_rename,
             commands::code_action,
+            commands::refactor_actions,
+            commands::resolve_refactor,
             commands::lsp_sync,
             commands::lsp_did_save,
             commands::search_in_files,

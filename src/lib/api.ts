@@ -547,6 +547,31 @@ export function codeAction(
   return invoke("code_action", { root, path, text, startLine, startCharacter, endLine, endCharacter });
 }
 
+/** A refactoring offered for a range; `action` resolves to edits via resolveRefactor. */
+export interface RefactorAction {
+  title: string;
+  kind: string | null;
+  action: string;
+}
+
+/** Refactoring actions (Extract Method/Variable/Constant/Field, Inline, …) for a range. */
+export function refactorActions(
+  root: string,
+  path: string,
+  text: string,
+  startLine: number,
+  startCharacter: number,
+  endLine: number,
+  endCharacter: number,
+): Promise<RefactorAction[]> {
+  return invoke("refactor_actions", { root, path, text, startLine, startCharacter, endLine, endCharacter });
+}
+
+/** Resolve a chosen refactoring into concrete per-file edits. */
+export function resolveRefactor(root: string, action: string): Promise<FileEdit[]> {
+  return invoke("resolve_refactor", { root, action });
+}
+
 /** One "Find Usages" hit: a location, its source line, and a usage category. */
 export interface Reference {
   path: string;

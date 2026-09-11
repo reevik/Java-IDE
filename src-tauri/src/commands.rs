@@ -2953,6 +2953,41 @@ pub async fn code_action(
         .map_err(|e| e.to_string())
 }
 
+/// Refactoring actions for a range (Extract Method/Variable/Constant/Field,
+/// Inline, …) — the Code → Refactoring menu.
+#[tauri::command]
+pub async fn refactor_actions(
+    root: String,
+    path: String,
+    text: String,
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+    app: tauri::AppHandle,
+    lsp: State<'_, LspState>,
+) -> Result<Vec<crate::lsp::RefactorAction>, String> {
+    let mut guard = lsp.0.lock().await;
+    let client = ensure_client(&mut guard, &app, &root).await?;
+    client
+        .refactor_actions(&path, &text, (start_line, start_character), (end_line, end_character))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Resolve a chosen refactoring into concrete per-file edits.
+#[tauri::command]
+pub async fn resolve_refactor(
+    root: String,
+    action: String,
+    app: tauri::AppHandle,
+    lsp: State<'_, LspState>,
+) -> Result<Vec<crate::lsp::FileEdit>, String> {
+    let mut guard = lsp.0.lock().await;
+    let client = ensure_client(&mut guard, &app, &root).await?;
+    client.resolve_refactor(&action).await.map_err(|e| e.to_string())
+}
+
 /// Hover info (type + docs) at a position, as Markdown, or null.
 #[tauri::command]
 pub async fn lsp_hover(

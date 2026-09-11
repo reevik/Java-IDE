@@ -912,6 +912,70 @@ impl LspClient {
         Ok(parse_code_actions(resp.get("result"), &uri))
     }
 
+    /// Refactoring actions for a range (Extract Method/Variable/Constant/Field,
+    /// Inline, etc.). Unlike quick fixes these are usually returned unresolved —
+    /// each carries the raw action JSON so `resolve_refactor` can fetch its edit.
+    pub async fn refactor_actions(
+        &self,
+        path: &str,
+        text: &str,
+        start: (u32, u32),
+        end: (u32, u32),
+    ) -> Result<Vec<RefactorAction>> {
+        self.sync(path, text).await?;
+        let uri = uri_of(path);
+        let resp = self
+            .request(
+                "textDocument/codeAction",
+                json!({
+                    "textDocument": { "uri": uri },
+                    "range": {
+                        "start": { "line": start.0, "character": start.1 },
+                        "end": { "line": end.0, "character": end.1 }
+                    },
+                    "context": { "diagnostics": [], "only": ["refactor"] }
+                }),
+                Duration::from_secs(8),
+            )
+            .await?;
+        let mut out = Vec::new();
+        if let Some(arr) = resp.get("result").and_then(Value::as_array) {
+            for a in arr {
+                let Some(title) = a.get("title").and_then(Value::as_str).filter(|t| !t.is_empty()) else {
+                    continue;
+                };
+                let kind = a.get("kind").and_then(Value::as_str).map(str::to_string);
+                // Keep only refactorings (defensive — we asked for `only: refactor`).
+                if kind.as_deref().map(|k| !k.starts_with("refactor")).unwrap_or(false) {
+                    continue;
+                }
+                out.push(RefactorAction {
+                    title: title.to_string(),
+                    kind,
+                    action: serde_json::to_string(a).unwrap_or_default(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Resolve a refactoring action (from `refactor_actions`) into concrete
+    /// per-file edits. Uses the inline `edit` if present, else `codeAction/resolve`.
+    pub async fn resolve_refactor(&self, action_json: &str) -> Result<Vec<FileEdit>> {
+        let action: Value = serde_json::from_str(action_json).context("parsing refactor action")?;
+        if let Some(edit) = action.get("edit").filter(|e| !e.is_null()) {
+            return Ok(parse_workspace_edit(Some(edit)));
+        }
+        let resp = self
+            .request("codeAction/resolve", action, Duration::from_secs(20))
+            .await?;
+        let resolved = resp.get("result").unwrap_or(&Value::Null);
+        if let Some(edit) = resolved.get("edit").filter(|e| !e.is_null()) {
+            return Ok(parse_workspace_edit(Some(edit)));
+        }
+        anyhow::bail!("This refactoring needs interactive support that isn't available yet.");
+    }
+
     /// All references to the symbol at a position ("Find Usages"), each with a
     /// trimmed source-line preview. Includes the declaration.
     pub async fn references(
@@ -1109,6 +1173,16 @@ pub struct CodeActionItem {
     pub is_preferred: bool,
     /// Edits for the current file, in the order the server gave them.
     pub edits: Vec<TextEditItem>,
+}
+
+/// A refactoring offered for a range. `action` is the raw LSP code-action JSON,
+/// passed back to `resolve_refactor` to fetch the actual edits.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefactorAction {
+    pub title: String,
+    pub kind: Option<String>,
+    pub action: String,
 }
 
 /// Whether a diagnostic's range overlaps the (inclusive) line span `[start.0, end.0]`.

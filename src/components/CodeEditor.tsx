@@ -54,7 +54,7 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { tags as t } from "@lezer/highlight";
-import { codeAction, gitDiff, gitStageFile, lspCompletion, lspDefinition, lspHover, lspReferences, lspRename, type CodeAction, type FileEdit, type Reference } from "../lib/api";
+import { codeAction, gitDiff, gitStageFile, lspCompletion, lspDefinition, lspHover, lspReferences, lspRename, refactorActions, resolveRefactor, type CodeAction, type FileEdit, type Reference, type RefactorAction } from "../lib/api";
 import type { ChangeMarker } from "../lib/api";
 import type { Breakpoint, LspDiagnostic } from "../lib/types";
 
@@ -957,6 +957,8 @@ interface Props {
   onFindUsages?: (symbol: string, refs: Reference[]) => void;
   /** Apply a project-wide rename's per-file edits (across open buffers + disk). */
   onRename?: (edits: FileEdit[]) => void;
+  /** Surface a refactoring error message (e.g. "needs interactive support"). */
+  onRefactorError?: (msg: string) => void;
   /** The AI agent is running — show the "You" caret label (collaborative mode). */
   agentActive?: boolean;
   /** Called after the gutter peek stages the file, so the Git panel can refresh. */
@@ -1123,6 +1125,8 @@ export interface CodeEditorHandle {
   unfoldAtCursor(): void;
   foldAll(): void;
   unfoldAll(): void;
+  /** Open the Refactor This popup at the caret (Rename + LSP refactorings). */
+  openRefactor(): void;
 }
 
 export const highlightStyle = HighlightStyle.define([
@@ -1206,6 +1210,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     onRunSymbol,
     onFindUsages,
     onRename,
+    onRefactorError,
     agentActive,
     onStaged,
   },
@@ -1266,6 +1271,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   onFindUsagesRef.current = onFindUsages;
   const onRenameRef = useRef(onRename);
   onRenameRef.current = onRename;
+  const onRefactorErrorRef = useRef(onRefactorError);
+  onRefactorErrorRef.current = onRefactorError;
   const onStagedRef = useRef(onStaged);
   onStagedRef.current = onStaged;
 
@@ -1413,6 +1420,52 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       window.removeEventListener("mousedown", onDown, true);
     };
   }, [quickFix]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Refactor menu (⌃T / Code → Refactoring): Rename + LSP refactorings -----
+  type RefactorItem = { kind: "rename" } | { kind: "lsp"; ra: RefactorAction };
+  const [refactorMenu, setRefactorMenu] = useState<{ x: number; y: number; items: RefactorItem[] | null } | null>(null);
+  const rfMenuRef = useRef<HTMLDivElement>(null);
+  const openRefactorRef = useRef<() => void>(() => {});
+
+  const applyRefactor = async (item: RefactorItem) => {
+    setRefactorMenu(null);
+    setCtxMenu(null);
+    if (item.kind === "rename") { startRename(); return; }
+    const v = view.current;
+    if (!v || !root) return;
+    try {
+      const edits = await resolveRefactor(root, item.ra.action);
+      if (edits.length) onRenameRef.current?.(edits);
+    } catch (e) {
+      onRefactorErrorRef.current?.(String(e));
+    }
+    v.focus();
+  };
+
+  openRefactorRef.current = () => {
+    const v = view.current;
+    if (!v || !path.endsWith(".java") || !root) return;
+    const coords = v.coordsAtPos(v.state.selection.main.head);
+    setRefactorMenu({ x: coords?.left ?? 120, y: coords?.bottom ?? 120, items: null });
+    const doc = v.state.doc;
+    const sel = v.state.selection.main;
+    const lc = (pos: number) => { const l = doc.lineAt(pos); return { line: l.number - 1, ch: pos - l.from }; };
+    const s = lc(sel.from);
+    const e = lc(sel.to);
+    void refactorActions(root, path, doc.toString(), s.line, s.ch, e.line, e.ch)
+      .then((ras) => setRefactorMenu((m) => (m ? { ...m, items: [{ kind: "rename" }, ...ras.map((ra) => ({ kind: "lsp", ra } as RefactorItem))] } : m)))
+      .catch(() => setRefactorMenu((m) => (m ? { ...m, items: [{ kind: "rename" }] } : m)));
+  };
+
+  // Close the refactor menu on outside click / Escape.
+  useEffect(() => {
+    if (!refactorMenu) return;
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); setRefactorMenu(null); view.current?.focus(); } };
+    const onDown = (ev: MouseEvent) => { if (!rfMenuRef.current?.contains(ev.target as Node)) setRefactorMenu(null); };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("mousedown", onDown, true);
+    return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("mousedown", onDown, true); };
+  }, [refactorMenu]);
 
   // --- Right-click editor menu (Copy/Cut/Paste, quick actions, Find Usages) ---
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1638,6 +1691,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       const v = view.current;
       if (v) unfoldAll(v);
     },
+    openRefactor: () => openRefactorRef.current(),
   }), []);
 
   // Create once per file; the parent remounts (via `key`) to swap files.
@@ -1692,6 +1746,14 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             key: "Alt-Enter",
             run: (v) => {
               void runQuickFixRef.current(v);
+              return true;
+            },
+          },
+          {
+            // IntelliJ-style "Refactor This" popup.
+            key: "Ctrl-t",
+            run: () => {
+              openRefactorRef.current();
               return true;
             },
           },
@@ -1834,6 +1896,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
               <>
                 <div className="my-1 border-t border-[color:var(--line)]" />
                 <CtxItem label="Rename…" hint="⇧F6" disabled={readOnly} onClick={() => { setCtxMenu(null); startRename(); }} />
+                <CtxItem label="Refactor This…" hint="⌃T" disabled={readOnly} onClick={() => { setCtxMenu(null); openRefactorRef.current(); }} />
                 <CtxItem label="Find Usages" hint="⇧F7" onClick={() => { setCtxMenu(null); void findUsages(); }} />
                 <div className="my-1 border-t border-[color:var(--line)]" />
                 {/* Quick actions (same as ⌥⏎) inline in the menu. */}
@@ -1856,6 +1919,29 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
                   ))
                 )}
               </>
+            )}
+          </div>,
+          document.body,
+        )}
+      {refactorMenu &&
+        createPortal(
+          <div ref={rfMenuRef} className="qf-menu min-w-[220px]" style={{ left: refactorMenu.x, top: refactorMenu.y }}>
+            <div className="px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Refactor This</div>
+            {refactorMenu.items === null ? (
+              <div className="qf-empty">Loading refactorings…</div>
+            ) : (
+              refactorMenu.items.map((item, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="qf-item"
+                  onClick={() => void applyRefactor(item)}
+                  title={item.kind === "rename" ? "Rename symbol" : item.ra.title}
+                >
+                  <span className="qf-bulb" aria-hidden>{item.kind === "rename" ? "✎" : "⚙"}</span>
+                  <span className="qf-title">{item.kind === "rename" ? "Rename…" : item.ra.title}</span>
+                </button>
+              ))
             )}
           </div>,
           document.body,
