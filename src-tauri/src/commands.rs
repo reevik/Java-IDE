@@ -2040,53 +2040,11 @@ pub struct AiConnector {
     pub detail: String,
 }
 
-/// Locate a command by checking common bin dirs then `which` (a GUI app's PATH
-/// can be minimal when launched from Finder).
-fn locate(cmd: &str) -> Option<String> {
-    let mut dirs = vec!["/opt/homebrew/bin".to_string(), "/usr/local/bin".to_string()];
-    if let Ok(home) = std::env::var("HOME") {
-        dirs.push(format!("{home}/.local/bin"));
-    }
-    for d in &dirs {
-        let p = PathBuf::from(d).join(cmd);
-        if p.exists() {
-            return Some(p.to_string_lossy().into_owned());
-        }
-    }
-    let out = std::process::Command::new("which").arg(cmd).output().ok()?;
-    if out.status.success() {
-        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !p.is_empty() {
-            return Some(p);
-        }
-    }
-    None
-}
-
-/// Number of models served by a local Ollama, if it's running.
-async fn ollama_models() -> Option<usize> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(700))
-        .build()
-        .ok()?;
-    let resp = client.get("http://localhost:11434/api/tags").send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let v: serde_json::Value = resp.json().await.ok()?;
-    Some(v.get("models").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0))
-}
-
 /// Auto-detect the AI connectors available on this machine for the AI Connectors
-/// settings. Only Claude Code and the Anthropic API are wired as active agents
-/// today; the rest are surfaced as detected so they can be adopted later.
+/// settings. Only the connectors the app can actually route to are listed.
 #[tauri::command]
-pub async fn detect_ai_connectors() -> Vec<AiConnector> {
+pub fn detect_ai_connectors() -> Vec<AiConnector> {
     let claude = llm::find_claude_cli().map(|p| p.to_string_lossy().into_owned());
-    let copilot = locate("copilot").or_else(|| locate("gh"));
-    let gemini = locate("gemini");
-    let ollama_bin = locate("ollama");
-    let ollama_running = ollama_models().await;
     let has_key = llm::get_api_key().is_some();
 
     vec![
@@ -2105,34 +2063,6 @@ pub async fn detect_ai_connectors() -> Vec<AiConnector> {
             available: has_key,
             usable: has_key,
             detail: if has_key { "API key saved in the keychain".into() } else { "No API key set".into() },
-        },
-        AiConnector {
-            id: "copilot-cli".into(),
-            label: "GitHub Copilot (CLI)".into(),
-            group: "cli".into(),
-            available: copilot.is_some(),
-            usable: false,
-            detail: copilot.map(|p| format!("{p} · integration coming")).unwrap_or_else(|| "Not found on PATH".into()),
-        },
-        AiConnector {
-            id: "gemini-cli".into(),
-            label: "Gemini (CLI)".into(),
-            group: "cli".into(),
-            available: gemini.is_some(),
-            usable: false,
-            detail: gemini.map(|p| format!("{p} · integration coming")).unwrap_or_else(|| "Not found on PATH".into()),
-        },
-        AiConnector {
-            id: "ollama".into(),
-            label: "Ollama (local)".into(),
-            group: "local".into(),
-            available: ollama_bin.is_some() || ollama_running.is_some(),
-            usable: false,
-            detail: match ollama_running {
-                Some(n) => format!("Running · {n} model(s) · integration coming"),
-                None if ollama_bin.is_some() => "Installed, not running · integration coming".into(),
-                None => "Not found".into(),
-            },
         },
     ]
 }
