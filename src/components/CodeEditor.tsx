@@ -1857,6 +1857,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   }, [stopLine]);
 
   const isJavaFile = path.endsWith(".java");
+  // The inline menu shows only quick fixes; refactorings live under "Refactor This…".
+  const quickActions = ctxActions?.filter((a) => !(a.kind ?? "").startsWith("refactor")) ?? null;
   return (
     <>
       <div
@@ -1899,13 +1901,14 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
                 <CtxItem label="Refactor This…" hint="⌃T" disabled={readOnly} onClick={() => { setCtxMenu(null); openRefactorRef.current(); }} />
                 <CtxItem label="Find Usages" hint="⇧F7" onClick={() => { setCtxMenu(null); void findUsages(); }} />
                 <div className="my-1 border-t border-[color:var(--line)]" />
-                {/* Quick actions (same as ⌥⏎) inline in the menu. */}
-                {ctxActions === null ? (
+                {/* Quick fixes (same as ⌥⏎) inline in the menu — refactorings are
+                    under "Refactor This…" instead, to avoid duplicate entries. */}
+                {quickActions === null ? (
                   <div className="px-3 py-1 text-[11px] text-[var(--text-tertiary)]">Loading actions…</div>
-                ) : ctxActions.length === 0 ? (
-                  <div className="px-3 py-1 text-[11px] text-[var(--text-tertiary)]">No quick actions</div>
+                ) : quickActions.length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-[var(--text-tertiary)]">No quick fixes</div>
                 ) : (
-                  ctxActions.map((a, i) => (
+                  quickActions.map((a, i) => (
                     <button
                       key={i}
                       type="button"
