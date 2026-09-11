@@ -23,6 +23,25 @@ const KEYRING_USER: &str = "anthropic-api-key";
 
 static MODEL_OVERRIDE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+/// The user's chosen default AI connector (e.g. "claude-code" | "anthropic-api"),
+/// or None for auto. Set from the AI Connectors settings; the frontend persists it.
+static PREFERRED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn set_preferred(id: Option<String>) {
+    *PREFERRED.lock().unwrap() = id.filter(|s| !s.trim().is_empty() && s != "auto");
+}
+pub fn preferred() -> Option<String> {
+    PREFERRED.lock().unwrap().clone()
+}
+/// The Claude CLI path, unless the user prefers the Anthropic API — then None so
+/// callers fall back to the API path.
+pub fn cli_if_allowed() -> Option<PathBuf> {
+    if preferred().as_deref() == Some("anthropic-api") {
+        return None;
+    }
+    find_claude_cli()
+}
+
 pub fn set_model_override(model: Option<String>) {
     *MODEL_OVERRIDE.lock().unwrap() = model.filter(|m| !m.trim().is_empty());
 }

@@ -338,6 +338,26 @@ export function aiSettings(): Promise<AiSettings> {
   return invoke("ai_settings");
 }
 
+/** One auto-detected AI connector for the AI Connectors settings. */
+export interface AiConnector {
+  id: string;
+  label: string;
+  group: "cli" | "api" | "local";
+  available: boolean;
+  usable: boolean;
+  detail: string;
+}
+
+/** Auto-detect the AI connectors available on this machine. */
+export function detectAiConnectors(): Promise<AiConnector[]> {
+  return invoke("detect_ai_connectors");
+}
+
+/** Set the default AI connector (null / "auto" → automatic). */
+export function setPreferredConnector(id: string | null): Promise<void> {
+  return invoke("set_preferred_connector", { id });
+}
+
 export function appVersion(): Promise<string> {
   return invoke("app_version");
 }

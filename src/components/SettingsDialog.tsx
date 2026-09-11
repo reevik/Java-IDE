@@ -4,10 +4,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   aiSettings,
   appVersion,
+  detectAiConnectors,
   detectedJdks,
   setLlmApiKey,
   setCodeStyle,
   setModel,
+  setPreferredConnector,
   setToolchainDir,
   toolchainInfo,
   toolPaths,
@@ -45,6 +47,17 @@ const MODEL_KEY = "ai.model";
 
 export function loadModel(): string {
   return localStorage.getItem(MODEL_KEY) ?? "";
+}
+
+const CONNECTOR_KEY = "ai.connector";
+
+/** The user's chosen default AI connector id, or "" for automatic. */
+export function loadPreferredConnector(): string {
+  return localStorage.getItem(CONNECTOR_KEY) ?? "";
+}
+export function savePreferredConnector(id: string) {
+  if (id) localStorage.setItem(CONNECTOR_KEY, id);
+  else localStorage.removeItem(CONNECTOR_KEY);
 }
 
 interface Props {
@@ -597,6 +610,77 @@ function Row({ label, value, mono, muted }: { label: string; value: string; mono
 
 // --- AI ---------------------------------------------------------------------
 
+function ConnectorsSection() {
+  const qc = useQueryClient();
+  const { data: connectors, isLoading, refetch, isFetching } = useQuery({ queryKey: ["ai-connectors"], queryFn: detectAiConnectors });
+  const [sel, setSel] = useState<string>(loadPreferredConnector());
+
+  const choose = (id: string) => {
+    setSel(id);
+    savePreferredConnector(id);
+    void setPreferredConnector(id || null);
+    qc.invalidateQueries({ queryKey: ["ai-settings"] });
+    qc.invalidateQueries({ queryKey: ["ai-backend"] });
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="mb-0.5 flex items-center justify-between gap-2">
+        <p className="text-[11.5px] text-[var(--text-tertiary)]">Detected AI agents on this machine. Pick the default.</p>
+        <button onClick={() => void refetch()} className="btn-bezel shrink-0 px-2 py-0.5 text-[11px]">{isFetching ? "Scanning…" : "Re-scan"}</button>
+      </div>
+
+      <ConnectorRow selected={sel === ""} disabled={false} onSelect={() => choose("")} label="Automatic" detail="Prefer Claude Code, else the Anthropic API." available dot="auto" />
+
+      {isLoading ? (
+        <p className="text-[12px] text-[var(--text-tertiary)]">Scanning…</p>
+      ) : (
+        connectors?.map((c) => (
+          <ConnectorRow
+            key={c.id}
+            selected={sel === c.id}
+            disabled={!c.usable}
+            onSelect={() => c.usable && choose(c.id)}
+            label={c.label}
+            detail={c.detail}
+            available={c.available}
+            dot={c.available ? (c.usable ? "ok" : "detected") : "off"}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function ConnectorRow({ selected, disabled, onSelect, label, detail, available, dot }: {
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  label: string;
+  detail: string;
+  available: boolean;
+  dot: "ok" | "detected" | "off" | "auto";
+}) {
+  const color = dot === "ok" ? "#1a7f37" : dot === "detected" ? "#c47f00" : dot === "auto" ? "var(--accent)" : "var(--text-tertiary)";
+  return (
+    <button
+      onClick={onSelect}
+      disabled={disabled}
+      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left ${selected ? "border-[color:var(--accent)] bg-[var(--accent-soft)]" : "border-[color:var(--line)]"} ${disabled ? "cursor-default opacity-60" : "hover:bg-[var(--hover)]"}`}
+    >
+      <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full border" style={{ borderColor: selected ? "var(--accent)" : "var(--line)" }}>
+        {selected && <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />}
+      </span>
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[12.5px] font-medium text-[var(--text-primary)]">{label}</span>
+        <span className="block truncate text-[11px] text-[var(--text-tertiary)]">{detail}</span>
+      </span>
+      {!available && <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">not found</span>}
+    </button>
+  );
+}
+
 function AiTab() {
   const qc = useQueryClient();
   const { data: settings } = useQuery({ queryKey: ["ai-settings"], queryFn: aiSettings });
@@ -627,21 +711,10 @@ function AiTab() {
     }
   };
 
-  const backend = settings?.backend ?? "none";
-  const backendText =
-    backend === "cli" ? "Claude CLI detected — used for AI features." :
-    backend === "api" ? "Anthropic API key configured." :
-    "No AI backend. Add an API key below, or install the Claude CLI.";
-
   return (
     <div>
-      <Section title="Backend">
-        <div className="flex items-center gap-2">
-          <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${backend === "none" ? "bg-black/10 text-[var(--text-tertiary)]" : "bg-green-400/15 text-green-700"}`}>
-            {backend === "cli" ? "Claude CLI" : backend === "api" ? "API key" : "Offline"}
-          </span>
-          <span className="text-[12px] text-[var(--text-secondary)]">{backendText}</span>
-        </div>
+      <Section title="AI Connectors">
+        <ConnectorsSection />
       </Section>
 
       <Section title="Model">

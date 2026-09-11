@@ -1983,12 +1983,14 @@ pub fn cargo_is_running() -> bool {
 
 #[tauri::command]
 pub fn ai_backend() -> &'static str {
-    if llm::find_claude_cli().is_some() {
-        "cli"
-    } else if llm::get_api_key().is_some() {
-        "api"
-    } else {
-        "none"
+    let has_cli = llm::find_claude_cli().is_some();
+    let has_key = llm::get_api_key().is_some();
+    match llm::preferred().as_deref() {
+        Some("anthropic-api") if has_key => "api",
+        Some("claude-code") if has_cli => "cli",
+        _ if has_cli => "cli",
+        _ if has_key => "api",
+        _ => "none",
     }
 }
 
@@ -2020,6 +2022,126 @@ pub fn ai_settings() -> AiSettings {
         default_model: llm::default_model().to_string(),
         model_override: llm::model_override(),
     }
+}
+
+/// One detected (or absent) AI connector for the AI Connectors settings.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConnector {
+    pub id: String,
+    pub label: String,
+    /// "cli" | "api" | "local"
+    pub group: String,
+    /// Detected on this machine.
+    pub available: bool,
+    /// The app can actually route agent/chat work to it today.
+    pub usable: bool,
+    /// Path / status / hint.
+    pub detail: String,
+}
+
+/// Locate a command by checking common bin dirs then `which` (a GUI app's PATH
+/// can be minimal when launched from Finder).
+fn locate(cmd: &str) -> Option<String> {
+    let mut dirs = vec!["/opt/homebrew/bin".to_string(), "/usr/local/bin".to_string()];
+    if let Ok(home) = std::env::var("HOME") {
+        dirs.push(format!("{home}/.local/bin"));
+    }
+    for d in &dirs {
+        let p = PathBuf::from(d).join(cmd);
+        if p.exists() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    let out = std::process::Command::new("which").arg(cmd).output().ok()?;
+    if out.status.success() {
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !p.is_empty() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Number of models served by a local Ollama, if it's running.
+async fn ollama_models() -> Option<usize> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(700))
+        .build()
+        .ok()?;
+    let resp = client.get("http://localhost:11434/api/tags").send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().await.ok()?;
+    Some(v.get("models").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0))
+}
+
+/// Auto-detect the AI connectors available on this machine for the AI Connectors
+/// settings. Only Claude Code and the Anthropic API are wired as active agents
+/// today; the rest are surfaced as detected so they can be adopted later.
+#[tauri::command]
+pub async fn detect_ai_connectors() -> Vec<AiConnector> {
+    let claude = llm::find_claude_cli().map(|p| p.to_string_lossy().into_owned());
+    let copilot = locate("copilot").or_else(|| locate("gh"));
+    let gemini = locate("gemini");
+    let ollama_bin = locate("ollama");
+    let ollama_running = ollama_models().await;
+    let has_key = llm::get_api_key().is_some();
+
+    vec![
+        AiConnector {
+            id: "claude-code".into(),
+            label: "Claude Code (CLI)".into(),
+            group: "cli".into(),
+            available: claude.is_some(),
+            usable: claude.is_some(),
+            detail: claude.unwrap_or_else(|| "Not found on PATH".into()),
+        },
+        AiConnector {
+            id: "anthropic-api".into(),
+            label: "Claude (Anthropic API)".into(),
+            group: "api".into(),
+            available: has_key,
+            usable: has_key,
+            detail: if has_key { "API key saved in the keychain".into() } else { "No API key set".into() },
+        },
+        AiConnector {
+            id: "copilot-cli".into(),
+            label: "GitHub Copilot (CLI)".into(),
+            group: "cli".into(),
+            available: copilot.is_some(),
+            usable: false,
+            detail: copilot.map(|p| format!("{p} · integration coming")).unwrap_or_else(|| "Not found on PATH".into()),
+        },
+        AiConnector {
+            id: "gemini-cli".into(),
+            label: "Gemini (CLI)".into(),
+            group: "cli".into(),
+            available: gemini.is_some(),
+            usable: false,
+            detail: gemini.map(|p| format!("{p} · integration coming")).unwrap_or_else(|| "Not found on PATH".into()),
+        },
+        AiConnector {
+            id: "ollama".into(),
+            label: "Ollama (local)".into(),
+            group: "local".into(),
+            available: ollama_bin.is_some() || ollama_running.is_some(),
+            usable: false,
+            detail: match ollama_running {
+                Some(n) => format!("Running · {n} model(s) · integration coming"),
+                None if ollama_bin.is_some() => "Installed, not running · integration coming".into(),
+                None => "Not found".into(),
+            },
+        },
+    ]
+}
+
+/// Set the default AI connector (from the AI Connectors settings). In-memory;
+/// the frontend persists the choice and re-applies it on startup.
+#[tauri::command]
+pub fn set_preferred_connector(id: Option<String>) {
+    llm::set_preferred(id);
 }
 
 #[tauri::command]
@@ -2319,7 +2441,7 @@ pub async fn review_code(
     app: tauri::AppHandle,
 ) -> Result<llm::Review, String> {
     let mut last_err: Option<String> = None;
-    if let Some(cli) = llm::find_claude_cli() {
+    if let Some(cli) = llm::cli_if_allowed() {
         let emit = |acc: &str| {
             let _ = app.emit("ai:review-progress", acc.to_string());
         };
@@ -2350,7 +2472,7 @@ pub async fn explain_code(
         let _ = app.emit("ai:text-progress", acc.to_string());
     };
     let mut last_err: Option<String> = None;
-    if let Some(cli) = llm::find_claude_cli() {
+    if let Some(cli) = llm::cli_if_allowed() {
         match llm::explain_via_cli(&cli, &label, &code, emit).await {
             Ok(t) => return Ok(t),
             Err(e) => {
@@ -2490,7 +2612,7 @@ pub async fn chat_send(
     let ctx = if ctx_buf.trim().is_empty() { None } else { Some(ctx_buf.as_str()) };
 
     let mut last_err: Option<String> = None;
-    if let Some(cli) = llm::find_claude_cli() {
+    if let Some(cli) = llm::cli_if_allowed() {
         match llm::chat_via_cli(&cli, ctx, &messages, emit).await {
             Ok(t) => return Ok(t),
             Err(e) => {
@@ -2726,7 +2848,7 @@ pub async fn generate_tasks(
     let emit = |acc: &str| {
         let _ = app.emit("ai:text-progress", acc.to_string());
     };
-    let text = if let Some(cli) = llm::find_claude_cli() {
+    let text = if let Some(cli) = llm::cli_if_allowed() {
         llm::tasks_via_cli(&cli, &description, &columns, emit).await.map_err(|e| e.to_string())?
     } else if let Some(key) = llm::get_api_key() {
         llm::tasks_via_api(&key, &description, &columns).await.map_err(|e| e.to_string())?
@@ -2780,7 +2902,7 @@ pub async fn fix_error(error: String, code: String, app: tauri::AppHandle) -> Re
         let _ = app.emit("ai:text-progress", acc.to_string());
     };
     let mut last_err: Option<String> = None;
-    if let Some(cli) = llm::find_claude_cli() {
+    if let Some(cli) = llm::cli_if_allowed() {
         match llm::fix_via_cli(&cli, &error, &code, emit).await {
             Ok(t) => return Ok(t),
             Err(e) => {

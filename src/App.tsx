@@ -22,7 +22,7 @@ import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
 import RunConfigDialog from "./components/RunConfigDialog";
-import SettingsDialog, { loadModel, loadToolchainDir } from "./components/SettingsDialog";
+import SettingsDialog, { loadModel, loadPreferredConnector, loadToolchainDir } from "./components/SettingsDialog";
 import TaskBoardDialog from "./components/TaskBoardDialog";
 import { loadCodeStyle } from "./lib/codeStyle";
 import { loadSaveActions } from "./lib/saveActions";
@@ -59,6 +59,7 @@ import {
   listTests,
   openProjectWindow,
   setModel,
+  setPreferredConnector,
   setToolchainDir,
   formatJava,
   debugContinue,
@@ -212,6 +213,8 @@ export default function App() {
   useEffect(() => {
     const m = loadModel();
     if (m) void setModel(m);
+    const conn = loadPreferredConnector();
+    if (conn) void setPreferredConnector(conn);
     const tc = loadToolchainDir();
     if (tc) void setToolchainDir(tc);
     const cs = loadCodeStyle();
