@@ -27,9 +27,17 @@ export default function Markdown({ text, resolveRef, onOpen, onApplyCode }: { te
   );
 }
 
+/** Fenced code blocks taller than this many lines start collapsed. */
+const COLLAPSE_LINES = 12;
+
 function CodeBlock({ code, lang, onApplyCode }: { code: string; lang: string; onApplyCode?: RefProps["onApplyCode"] }) {
   const [note, setNote] = useState<string | null>(null);
   const canApply = !!onApplyCode && isRust(lang) && code.trim().length > 0;
+
+  // Long blocks (e.g. build/run output routed to the agent) start collapsed.
+  const lineCount = code.split("\n").length;
+  const collapsible = lineCount > COLLAPSE_LINES;
+  const [collapsed, setCollapsed] = useState(collapsible);
 
   const copy = async () => {
     try {
@@ -59,10 +67,35 @@ function CodeBlock({ code, lang, onApplyCode }: { code: string; lang: string; on
           </button>
         )}
       </div>
-      <pre className="cm-code-snippet overflow-x-auto rounded-lg border border-[color:var(--line)] bg-[var(--surface-2)] p-2.5 font-mono text-[11.5px] leading-[1.5]">
-        <code>{isRust(lang) ? highlightRust(code) : code}</code>
-      </pre>
+      <div className="relative">
+        <pre
+          className="cm-code-snippet overflow-x-auto rounded-lg border border-[color:var(--line)] bg-[var(--surface-2)] p-2.5 font-mono text-[11.5px] leading-[1.5]"
+          style={collapsed ? { maxHeight: 132, overflowY: "hidden" } : undefined}
+        >
+          <code>{isRust(lang) ? highlightRust(code) : code}</code>
+        </pre>
+        {collapsible && collapsed && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 rounded-b-lg bg-gradient-to-t from-[var(--surface-2)] to-transparent" />
+        )}
+      </div>
+      {collapsible && (
+        <button
+          onClick={() => setCollapsed((v) => !v)}
+          className="mt-1 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--accent-strong)] hover:bg-[var(--accent-soft)]"
+        >
+          <Chevron open={!collapsed} />
+          {collapsed ? `Show all ${lineCount} lines` : "Collapse"}
+        </button>
+      )}
     </div>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }}>
+      <path d="M9 6l6 6-6 6" />
+    </svg>
   );
 }
 
