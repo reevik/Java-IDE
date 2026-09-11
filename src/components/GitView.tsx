@@ -343,7 +343,6 @@ function CurrentChanges({ root, onOpenDiff, onOpenFile }: { root: string; onOpen
         <ConflictResolver
           root={root}
           change={resolving}
-          onOpenFile={onOpenFile}
           onMerge={() => { setMerging(resolving); setResolving(null); }}
           onDone={() => { setResolving(null); refresh(); }}
           onClose={() => setResolving(null)}
@@ -392,10 +391,9 @@ function ConflictGroup({ items, onOpen, onResolve }: { items: GitChange[]; onOpe
 }
 
 /** A small dialog offering ways to resolve one conflicted file. */
-function ConflictResolver({ root, change, onOpenFile, onMerge, onDone, onClose }: {
+function ConflictResolver({ root, change, onMerge, onDone, onClose }: {
   root: string;
   change: GitChange;
-  onOpenFile: (relPath: string) => void;
   onMerge: () => void;
   onDone: () => void;
   onClose: () => void;
@@ -405,11 +403,6 @@ function ConflictResolver({ root, change, onOpenFile, onMerge, onDone, onClose }
   const take = async (side: "ours" | "theirs") => {
     setBusy(side); setErr(null);
     try { await gitResolve(root, change.path, side); onDone(); }
-    catch (e) { setErr(String(e)); setBusy(null); }
-  };
-  const markResolved = async () => {
-    setBusy("mark"); setErr(null);
-    try { await gitStage(root, [change.path]); onDone(); }
     catch (e) { setErr(String(e)); setBusy(null); }
   };
 
@@ -423,18 +416,12 @@ function ConflictResolver({ root, change, onOpenFile, onMerge, onDone, onClose }
 
         <div className="flex flex-col gap-2">
           <ResolveOption
-            title="Open 3-way merge tool"
+            title="3-way conflict resolution"
             detail="Resolve conflict-by-conflict with Current, Result, and Incoming side by side."
             onClick={onMerge}
           />
-          <ResolveOption
-            title="Edit manually"
-            detail="Open the raw file and resolve the <<<<<<< / ======= / >>>>>>> markers yourself, then Mark resolved."
-            onClick={() => { onOpenFile(change.path); onClose(); }}
-          />
-          <ResolveOption title="Use current (ours)" detail="Keep this branch's version and discard the incoming changes for this file." busy={busy === "ours"} onClick={() => void take("ours")} />
-          <ResolveOption title="Use incoming (theirs)" detail="Take the incoming version and discard this branch's changes for this file." busy={busy === "theirs"} onClick={() => void take("theirs")} />
-          <ResolveOption title="Mark resolved" detail="Stage the file as-is (after you've edited it) to clear the conflict." busy={busy === "mark"} onClick={() => void markResolved()} />
+          <ResolveOption title="Accept theirs" detail="Take the incoming version and discard your changes for this file." busy={busy === "theirs"} onClick={() => void take("theirs")} />
+          <ResolveOption title="Accept mine" detail="Keep your version and discard the incoming changes for this file." busy={busy === "ours"} onClick={() => void take("ours")} />
         </div>
 
         {err && <p className="mt-3 text-[11px] text-red-600">{err}</p>}
