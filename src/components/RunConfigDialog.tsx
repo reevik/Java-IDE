@@ -291,8 +291,15 @@ export function KindIcon({ type }: { type: RunType }) {
       );
     default: // application
       return (
-        <svg viewBox="0 0 24 24" width="12" height="12" className="shrink-0 text-green-600" fill="currentColor">
-          <path d="M7 4l12 8-12 8z" />
+        <svg viewBox="0 0 24 24" width="14" height="14" className="shrink-0">
+          <g transform="translate(0 -1028.4)">
+            <path d="m1 1035.4v1 1 2 1 1 1 1 2 1 2 1c0 1.1 0.8954 2 2 2h9 9c1.105 0 2-0.9 2-2v-1-2-4-2-3-1-1h-22z" fill="#bdc3c7" />
+            <path d="m3 2c-1.1046 0-2 0.8954-2 2v3h22v-3c0-1.1046-0.895-2-2-2h-9-9z" transform="translate(0 1028.4)" fill="#bdc3c7" />
+            <path d="m1 6v1 1 2 1 1 1 1 2 1 2 1c0 1.105 0.8954 2 2 2h9 9c1.105 0 2-0.895 2-2v-1-2-4-2-3-1-1h-22z" transform="translate(0 1028.4)" fill="#ecf0f1" />
+            <path d="m4 4a1 1 0 1 1 -2 0 1 1 0 1 1 2 0z" transform="translate(0 1028.4)" fill="#c0392b" />
+            <path d="m4 4a1 1 0 1 1 -2 0 1 1 0 1 1 2 0z" transform="translate(3 1028.4)" fill="#27ae60" />
+            <path d="m4 4a1 1 0 1 1 -2 0 1 1 0 1 1 2 0z" transform="translate(6 1028.4)" fill="#f39c12" />
+          </g>
         </svg>
       );
   }
