@@ -45,6 +45,8 @@ import { toml } from "@codemirror/legacy-modes/mode/toml";
 import { properties } from "@codemirror/legacy-modes/mode/properties";
 import { groovy } from "@codemirror/legacy-modes/mode/groovy";
 import { kotlin } from "@codemirror/legacy-modes/mode/clike";
+import { yaml as yamlMode } from "@codemirror/legacy-modes/mode/yaml";
+import { loadAll as yamlLoadAll, YAMLException } from "js-yaml";
 import {
   autocompletion,
   completeAnyWord,
@@ -731,6 +733,71 @@ const jsonInlineDiagPlugin = ViewPlugin.fromClass(
     }
     update(u: ViewUpdate) {
       if (u.docChanged) this.decorations = buildInlineDiags(u.view.state.doc, jsonDiagnostics(u.view));
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+// --- YAML: highlighting + validation ----------------------------------------
+
+const yamlLang = StreamLanguage.define(yamlMode);
+
+/** Parse a YAML document (all `---`-separated docs) and surface the first
+ *  syntax error, plus a hard error for any tab used for indentation (invalid in
+ *  YAML and a common gotcha). */
+function yamlDiagnostics(view: EditorView): LspDiagnostic[] {
+  const doc = view.state.doc;
+  const text = doc.toString();
+  if (text.trim() === "") return [];
+  const out: LspDiagnostic[] = [];
+
+  // Tabs in leading whitespace are illegal in YAML — catch them explicitly.
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    const lead = /^[ \t]*/.exec(line.text)?.[0] ?? "";
+    const tab = lead.indexOf("\t");
+    if (tab !== -1) {
+      out.push({
+        range: { start: { line: i - 1, character: tab }, end: { line: i - 1, character: tab + 1 } },
+        severity: 1,
+        message: "YAML: tabs cannot be used for indentation — use spaces.",
+      });
+    }
+  }
+
+  try {
+    yamlLoadAll(text);
+  } catch (e) {
+    if (e instanceof YAMLException && e.mark) {
+      const ln = Math.min(Math.max(e.mark.line, 0), doc.lines - 1);
+      const line = doc.line(ln + 1);
+      const ch = Math.min(Math.max(e.mark.column, 0), Math.max(line.length - 1, 0));
+      out.push({
+        range: { start: { line: ln, character: ch }, end: { line: ln, character: line.length } },
+        severity: 1,
+        message: `YAML: ${e.reason || e.message}`,
+      });
+    } else {
+      out.push({
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+        severity: 1,
+        message: `YAML: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  }
+  return out;
+}
+
+const yamlLinter = linter((view) => toCmDiagnostics(view, yamlDiagnostics(view)), { delay: 300 });
+
+const yamlInlineDiagPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildInlineDiags(view.state.doc, yamlDiagnostics(view));
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged) this.decorations = buildInlineDiags(u.view.state.doc, yamlDiagnostics(u.view));
     }
   },
   { decorations: (v) => v.decorations },
@@ -1787,6 +1854,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         ...(path.endsWith(".properties") ? [propertiesLang, propertiesLinter, propertiesInlineDiagPlugin] : []),
         // JSON: highlighting + object/array folding + parse-error location.
         ...(path.endsWith(".json") ? [json(), jsonLinter, jsonInlineDiagPlugin] : []),
+        // YAML (.yaml/.yml): highlighting + syntax validation.
+        ...(path.endsWith(".yaml") || path.endsWith(".yml") ? [yamlLang, yamlLinter, yamlInlineDiagPlugin] : []),
         ...(path.endsWith(".toml") ? [StreamLanguage.define(toml)] : []),
         // Gradle: Groovy DSL (build.gradle / settings.gradle) or Kotlin DSL
         // (*.gradle.kts), with DSL + buffer-word completion.
