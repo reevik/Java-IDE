@@ -634,7 +634,7 @@ function Row({
         className={`nav-row flex items-center gap-1.5 py-[3px] pr-1.5 text-[12.5px] ${activeCls} ${dropOver ? "nav-row-drop" : ""}`}
       >
         {isDir ? <Chevron open={open} /> : <span className="w-3 shrink-0" />}
-        {node.rootKind ? <RootIcon kind={node.rootKind} /> : node.isPackage ? <PackageIcon /> : <FileIcon name={node.name} isDir={isDir} />}
+        {node.rootKind ? <RootIcon kind={node.rootKind} /> : node.isPackage ? <PackageIcon /> : <FileIcon name={node.name} isDir={isDir} javaKind={node.javaKind} />}
         <span className={`min-w-0 flex-1 truncate ${node.isPackage ? "text-[var(--text-secondary)]" : ""}`}>{node.name}</span>
         {node.rootKind && (
           <span className="shrink-0 rounded bg-[var(--surface-2)] px-1 text-[9.5px] uppercase tracking-wide text-[var(--text-tertiary)]">
@@ -728,7 +728,27 @@ function RootIcon({ kind }: { kind: RootKind }) {
 }
 
 /** Java files get the accent; folders and build files stay neutral. */
-function FileIcon({ name, isDir }: { name: string; isDir: boolean }) {
+/** Type badge for a Java file: a filled circle with a letter (IntelliJ-style,
+ *  in the app's red-orange family). Colour varies subtly by kind. */
+const JAVA_BADGE: Record<NonNullable<TreeNode["javaKind"]>, { letter: string; fill: string }> = {
+  class: { letter: "C", fill: "#e4551f" },
+  interface: { letter: "I", fill: "#c2410c" },
+  enum: { letter: "E", fill: "#b45309" },
+  record: { letter: "R", fill: "#d1451b" },
+  annotation: { letter: "@", fill: "#9a3412" },
+};
+
+function JavaBadge({ kind }: { kind: NonNullable<TreeNode["javaKind"]> }) {
+  const { letter, fill } = JAVA_BADGE[kind];
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" className="shrink-0" aria-label={kind}>
+      <circle cx="12" cy="12" r="9" fill={fill} />
+      <text x="12" y="16.5" textAnchor="middle" fontSize="12" fontWeight="700" fontFamily="ui-sans-serif, system-ui, sans-serif" fill="#fff">{letter}</text>
+    </svg>
+  );
+}
+
+function FileIcon({ name, isDir, javaKind }: { name: string; isDir: boolean; javaKind?: TreeNode["javaKind"] }) {
   if (isDir) {
     return (
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" className="shrink-0 text-[var(--text-tertiary)]">
@@ -736,6 +756,7 @@ function FileIcon({ name, isDir }: { name: string; isDir: boolean }) {
       </svg>
     );
   }
+  if (javaKind) return <JavaBadge kind={javaKind} />;
   const java = name.endsWith(".java");
   const build = name === "pom.xml" || name.endsWith(".gradle") || name.endsWith(".gradle.kts");
   return (

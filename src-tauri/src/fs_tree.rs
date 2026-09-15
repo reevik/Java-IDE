@@ -2,11 +2,16 @@ use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TreeNode {
     pub name: String,
     pub path: String,
     pub kind: &'static str, // "file" | "dir"
     pub children: Option<Vec<TreeNode>>,
+    /// For `.java` files: the declared top-level type — "class" | "interface" |
+    /// "enum" | "record" | "annotation" — for a type-specific tree icon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub java_kind: Option<&'static str>,
 }
 
 /// Directories that would swamp the tree and are never hand-edited.
@@ -65,13 +70,16 @@ fn collect(dir: &Path, depth: usize) -> Vec<TreeNode> {
                 path: path.to_string_lossy().to_string(),
                 kind: "dir",
                 children: Some(collect(&path, depth + 1)),
+                java_kind: None,
             });
         } else if is_source(&path) {
+            let java_kind = if name.ends_with(".java") { classify_java(&path) } else { None };
             files.push(TreeNode {
                 name,
                 path: path.to_string_lossy().to_string(),
                 kind: "file",
                 children: None,
+                java_kind,
             });
         }
     }
@@ -80,6 +88,53 @@ fn collect(dir: &Path, depth: usize) -> Vec<TreeNode> {
     dirs.sort_by(by_name);
     files.sort_by(by_name);
     dirs.into_iter().chain(files).collect()
+}
+
+/// Classify a `.java` file by its first top-level type declaration, reading only
+/// a bounded prefix (declarations follow the imports, near the top).
+fn classify_java(path: &Path) -> Option<&'static str> {
+    use std::io::Read;
+    let mut buf = [0u8; 8192];
+    let n = std::fs::File::open(path).ok()?.read(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf[..n]);
+
+    let mut in_block = false;
+    for raw in text.lines() {
+        let mut line = raw.trim();
+        if in_block {
+            match line.find("*/") {
+                Some(i) => { in_block = false; line = line[i + 2..].trim(); }
+                None => continue,
+            }
+        }
+        // Strip a leading line comment / block-comment open on this line.
+        if line.starts_with("//") || line.starts_with('*') || line.is_empty() {
+            continue;
+        }
+        if let Some(i) = line.find("/*") {
+            in_block = !line[i + 2..].contains("*/");
+            line = line[..i].trim();
+        }
+        if line.contains("@interface") {
+            return Some("annotation");
+        }
+        // Skip modifiers and annotations; the first real keyword wins.
+        const MODIFIERS: &[&str] = &[
+            "public", "private", "protected", "final", "abstract", "sealed", "non-sealed", "static", "strictfp",
+        ];
+        for tok in line.split_whitespace() {
+            match tok {
+                "class" => return Some("class"),
+                "interface" => return Some("interface"),
+                "enum" => return Some("enum"),
+                "record" => return Some("record"),
+                t if MODIFIERS.contains(&t) => continue,
+                t if t.starts_with('@') => continue,
+                _ => break, // not a type-declaration line — try the next line
+            }
+        }
+    }
+    None
 }
 
 pub fn read_file(path: &Path) -> Result<String> {

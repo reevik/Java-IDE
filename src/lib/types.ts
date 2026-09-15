@@ -19,11 +19,15 @@ export interface ProjectInfo {
   has_lib: boolean;
 }
 
+export type JavaKind = "class" | "interface" | "enum" | "record" | "annotation";
+
 export interface TreeNode {
   name: string;
   path: string;
   kind: "file" | "dir";
   children: TreeNode[] | null;
+  /** For `.java` files: the declared top-level type, for a type-specific icon. */
+  javaKind?: JavaKind;
 }
 
 /** One compiler message, flattened for the Problems list. */
