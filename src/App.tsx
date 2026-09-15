@@ -71,6 +71,7 @@ import {
   debugSetBreakpoints,
   debugStack,
   debugStart,
+  debugAttach,
   debugStepIn,
   debugStepOut,
   debugStop,
@@ -926,9 +927,47 @@ export default function App() {
     [project, saveNow],
   );
 
+  // Remote JVM Debug: attach the debugger to a JVM running the JDWP agent.
+  const attachRemote = useCallback(
+    async (c: RunConfig) => {
+      if (!project) return;
+      const port = parseInt(c.port ?? "", 10);
+      setOutputHidden(false);
+      setOutputTab("debugger");
+      if (!port) {
+        setDebugConsole(["Set the JDWP port on the Remote JVM Debug configuration."]);
+        return;
+      }
+      if (!hasDebuggerRef.current) {
+        setDebugConsole([
+          "Debugger unavailable: the java-debug plugin isn't installed.",
+          "Open the Debugger tab and click “Install java-debug”, then reopen the project.",
+        ]);
+        return;
+      }
+      const host = c.host?.trim() || "localhost";
+      setDebugConsole([`Attaching to ${host}:${port}…`]);
+      setDebugStatus("building");
+      try {
+        await debugAttach(project.path, host, port, toSourceMap(breakpointsRef.current));
+        setDebugStatus("running");
+        setDebugConsole((p) => [...p, `Attached to ${host}:${port}.`]);
+      } catch (e) {
+        setDebugConsole((p) => [...p, String(e)]);
+        setDebugStatus("idle");
+      }
+    },
+    [project],
+  );
+
   /** Run any run configuration — routing by type (goals vs run/test). */
   const runConfig = useCallback(
     (c: RunConfig) => {
+      // Remote debug has nothing to "run" — Run and Debug both attach.
+      if (c.type === "remote") {
+        void attachRemote(c);
+        return;
+      }
       setOutputTab("output");
       // Java Application: resolve target/classes + deps and launch java directly
       // (robust vs. exec:java). Empty main class uses the project's default.
@@ -962,7 +1001,7 @@ export default function App() {
         void runCargo(command, extra, env);
       }
     },
-    [runCargo, runGoal, runJavaApp, buildTool, info?.bins],
+    [runCargo, runGoal, runJavaApp, attachRemote, buildTool, info?.bins],
   );
 
   /** Run the currently-selected run configuration. */
@@ -1469,6 +1508,11 @@ export default function App() {
       return;
     }
     if (!selectedConfig) return;
+    // Remote JVM Debug: attach instead of launching.
+    if (selectedConfig.type === "remote") {
+      await attachRemote(selectedConfig);
+      return;
+    }
     // Java Application and Spring Boot configs launch under the debugger (both
     // run a main class).
     if (selectedConfig.type !== "application" && selectedConfig.type !== "spring") {
@@ -1483,7 +1527,7 @@ export default function App() {
     };
     setDebugTarget(target);
     await launchDebug(target);
-  }, [project, selectedConfig, info, launchDebug]);
+  }, [project, selectedConfig, info, launchDebug, attachRemote]);
 
   // Debug a specific gutter runnable (a main class; tests aren't debuggable yet).
   const debugSymbol = useCallback((run: Runnable) => {

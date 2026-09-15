@@ -3423,6 +3423,60 @@ pub async fn debug_start(
     Ok(())
 }
 
+/// Attach the debugger to a remote JVM started with the JDWP agent
+/// (`-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:<port>`).
+#[tauri::command]
+pub async fn debug_attach(
+    root: String,
+    host: String,
+    port: u16,
+    breakpoints: HashMap<String, Vec<crate::dap::SourceBp>>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    lsp: State<'_, LspState>,
+    dap: State<'_, DapState>,
+) -> Result<(), String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    let host = if host.trim().is_empty() { "localhost".to_string() } else { host.trim().to_string() };
+
+    // The DAP server is hosted by the JDT plugin, same as launch.
+    let dap_port = {
+        let mut guard = lsp.0.lock().await;
+        let client = ensure_client(&mut guard, &app, &root).await?;
+        client.start_debug_session().await.map_err(|e| format!("starting debug session: {e}"))?
+    };
+
+    // Source roots let the adapter map remote stack frames back to local .java.
+    let source_paths = cargo::source_roots(&r);
+    let attach = serde_json::json!({
+        "type": "java",
+        "request": "attach",
+        "name": format!("Attach {host}:{port}"),
+        "hostName": host,
+        "port": port,
+        "sourcePaths": source_paths,
+        "stepFilters": {
+            "classNameFilters": [
+                "java.*", "javax.*", "jakarta.*", "sun.*", "com.sun.*",
+                "jdk.*", "kotlin.*", "scala.*", "org.junit.*"
+            ],
+            "skipSynthetics": true,
+            "skipStaticInitializers": true,
+            "skipConstructors": false
+        },
+    });
+
+    if let Some(prev) = dap.0.lock().await.take() {
+        let _ = prev.disconnect().await;
+    }
+    let client = crate::dap::DapClient::start(app.clone(), dap_port, attach, &breakpoints)
+        .await
+        .map_err(|e| format!("attaching to {host}:{port} — is the JVM running with the JDWP agent? ({e})"))?;
+    *dap.0.lock().await = Some(client);
+    Ok(())
+}
+
 /// Update breakpoints for one file mid-session (no-op when not debugging).
 #[tauri::command]
 pub async fn debug_set_breakpoints(

@@ -698,6 +698,15 @@ export function debugStart(
 ): Promise<void> {
   return invoke("debug_start", { root, kind, name, args, breakpoints });
 }
+/** Attach the debugger to a remote JVM running the JDWP agent. */
+export function debugAttach(
+  root: string,
+  host: string,
+  port: number,
+  breakpoints: Record<string, SourceBreakpoint[]>,
+): Promise<void> {
+  return invoke("debug_attach", { root, host, port, breakpoints });
+}
 export function debugSetBreakpoints(path: string, breakpoints: SourceBreakpoint[]): Promise<void> {
   return invoke("debug_set_breakpoints", { path, breakpoints });
 }

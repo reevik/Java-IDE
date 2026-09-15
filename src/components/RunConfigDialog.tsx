@@ -13,6 +13,7 @@ import { GradleLogo, MavenLogo } from "./BuildView";
 const TYPES: { type: RunType; label: string }[] = [
   { type: "application", label: "Java Application" },
   { type: "spring", label: "Spring Boot" },
+  { type: "remote", label: "Remote JVM Debug" },
   { type: "maven", label: "Maven" },
   { type: "gradle", label: "Gradle" },
   { type: "junit", label: "JUnit" },
@@ -200,6 +201,33 @@ export default function RunConfigDialog({ configs, tests, mains, springMains, on
                   </>
                 )}
 
+                {sel.type === "remote" && (
+                  <>
+                    <div className="grid grid-cols-[1fr_120px] gap-2">
+                      <Field label="Host" hint="The machine running the JVM (localhost when it's on this machine).">
+                        <input value={sel.host ?? ""} onChange={(e) => update({ host: e.target.value })} placeholder="localhost" spellCheck={false} className="field w-full px-2 py-1.5 font-mono text-[12px]" />
+                      </Field>
+                      <Field label="Port" hint="JDWP port.">
+                        <input value={sel.port ?? ""} onChange={(e) => update({ port: e.target.value.replace(/[^0-9]/g, "") })} placeholder="5005" spellCheck={false} className={`field w-full px-2 py-1.5 font-mono text-[12px] ${!sel.port?.trim() ? "ring-1 ring-red-500/60" : ""}`} />
+                      </Field>
+                    </div>
+                    {!sel.port?.trim() && (
+                      <p className="-mt-1 flex items-center gap-1 text-[11px] text-red-600"><ErrorIcon /> Set the JDWP port to attach to.</p>
+                    )}
+                    <Field label="On the remote JVM" hint="Start the target JVM with this agent, then Debug this configuration to attach.">
+                      <div className="flex items-center gap-2">
+                        <code className="field min-w-0 flex-1 overflow-x-auto whitespace-nowrap px-2 py-1.5 font-mono text-[11.5px] text-[var(--text-secondary)]">{jdwpArg(sel.port)}</code>
+                        <button
+                          onClick={() => void navigator.clipboard.writeText(jdwpArg(sel.port)).catch(() => {})}
+                          className="btn-bezel shrink-0 px-2.5 py-1.5 text-[12px]"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </Field>
+                  </>
+                )}
+
                 {(sel.type === "maven" || sel.type === "gradle") && (
                   <Field
                     label={sel.type === "maven" ? "Goals" : "Tasks"}
@@ -317,8 +345,21 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
+/** The JDWP agent argument to start the remote JVM with. */
+export function jdwpArg(port?: string): string {
+  return `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:${port?.trim() || "5005"}`;
+}
+
 export function KindIcon({ type }: { type: RunType }) {
   switch (type) {
+    case "remote":
+      // Broadcast / remote link.
+      return (
+        <svg viewBox="0 0 24 24" width="14" height="14" className="shrink-0 text-[#8250df]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="2" />
+          <path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19 5a10 10 0 0 1 0 14M5 19A10 10 0 0 1 5 5" />
+        </svg>
+      );
     case "spring":
       // Spring leaf mark.
       return (

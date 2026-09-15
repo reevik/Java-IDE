@@ -1,7 +1,7 @@
 import type { CargoCommand } from "./types";
 
 /** The kind of thing a run configuration launches. */
-export type RunType = "application" | "spring" | "maven" | "gradle" | "junit";
+export type RunType = "application" | "spring" | "remote" | "maven" | "gradle" | "junit";
 
 /** An IntelliJ-style, typed run configuration for a project. */
 export interface RunConfig {
@@ -16,6 +16,10 @@ export interface RunConfig {
   profiles?: string;
   /** junit: a filter — `Class` or `Class#method` (empty = all tests). */
   testTarget?: string;
+  /** remote: the JDWP host to attach to (default localhost). */
+  host?: string;
+  /** remote: the JDWP port to attach to (e.g. 5005). */
+  port?: string;
   /** application: program arguments passed to the program. */
   args: string[];
   /** Environment variables for the process. */
@@ -65,6 +69,8 @@ export function newConfig(type: RunType): RunConfig {
   switch (type) {
     case "spring":
       return { ...base, name: "Spring Boot", mainClass: "" };
+    case "remote":
+      return { ...base, name: "Remote debug", host: "localhost", port: "5005" };
     case "maven":
       return { ...base, name: "Maven", goals: "clean install", profiles: "" };
     case "gradle":

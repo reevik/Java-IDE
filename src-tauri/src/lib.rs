@@ -426,6 +426,7 @@ pub fn run() {
             commands::debugger_adapter,
             commands::install_java_debug,
             commands::debug_start,
+            commands::debug_attach,
             commands::debug_set_breakpoints,
             commands::debug_continue,
             commands::debug_next,

@@ -270,9 +270,10 @@ impl DapClient {
             .await
             .context("initialize")?;
 
-        // The launch config is built by the caller (mainClass/projectName/
-        // classPaths/modulePaths/cwd/args/vmArgs), resolved from the JDT server.
-        let launch_rx = client.send("launch", launch).await?;
+        // The config is built by the caller. Its `request` field selects the DAP
+        // command: "launch" (start a JVM) or "attach" (connect to a remote one).
+        let req_kind = launch.get("request").and_then(Value::as_str).unwrap_or("launch").to_string();
+        let launch_rx = client.send(&req_kind, launch).await?;
 
         // The adapter is ready for breakpoints once it emits `initialized`.
         let _ = tokio::time::timeout(Duration::from_secs(15), client.initialized.notified()).await;
