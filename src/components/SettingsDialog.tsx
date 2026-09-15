@@ -29,39 +29,43 @@ import { editorThemeOptions, loadEditorTheme, saveEditorTheme } from "../lib/edi
 
 /** IntelliJ-style settings navigation: top-level leaves and expandable groups
  *  whose children are leaves. Each leaf renders a panel on the right. */
-interface NavLeaf { id: string; label: string; render: () => React.ReactNode }
+interface NavLeaf { id: string; label: string; render: () => React.ReactNode; keywords?: string }
 interface NavGroup { id: string; label: string; children: NavLeaf[] }
 type NavNode = NavLeaf | NavGroup;
 const isGroup = (n: NavNode): n is NavGroup => "children" in n;
 
 const NAV: NavNode[] = [
-  { id: "appearance", label: "Appearance", render: () => <AppearanceTab /> },
-  { id: "general", label: "General", render: () => <GeneralTab /> },
+  { id: "appearance", label: "Appearance", render: () => <AppearanceTab />, keywords: "theme dark light color scheme editor font size family right margin wrap" },
+  { id: "general", label: "General", render: () => <GeneralTab />, keywords: "about version layout tabs" },
   {
     id: "editor",
     label: "Editor",
     children: [
-      { id: "codestyle", label: "Code Style", render: () => <div><CodeStyleSection /></div> },
-      { id: "saveactions", label: "Save Actions", render: () => <div><SaveActionsSection /></div> },
+      { id: "codestyle", label: "Code Style", render: () => <div><CodeStyleSection /></div>, keywords: "code style formatter google aosp eclipse import xml profile" },
+      { id: "saveactions", label: "Save Actions", render: () => <div><SaveActionsSection /></div>, keywords: "actions on save organize imports reformat format" },
     ],
   },
   {
     id: "java",
     label: "Java",
-    children: [{ id: "jdk", label: "JDK", render: () => <JdkPanel /> }],
+    children: [{ id: "jdk", label: "JDK", render: () => <JdkPanel />, keywords: "jdk java version toolchain home javac vendor sdk runtime" }],
   },
   {
     id: "ai",
     label: "AI",
     children: [
-      { id: "ai-connectors", label: "Connectors", render: () => <AiConnectorsPanel /> },
-      { id: "ai-model", label: "Model & API", render: () => <AiModelPanel /> },
+      { id: "ai-connectors", label: "Connectors", render: () => <AiConnectorsPanel />, keywords: "ai connectors claude code anthropic ollama default agent detect backend" },
+      { id: "ai-model", label: "Model & API", render: () => <AiModelPanel />, keywords: "model api key anthropic sonnet opus haiku token" },
     ],
   },
-  { id: "tools", label: "Tools", render: () => <ToolsTab /> },
+  { id: "tools", label: "Tools", render: () => <ToolsTab />, keywords: "tools toolchain maven gradle git paths executables" },
 ];
 
 const ALL_LEAVES: NavLeaf[] = NAV.flatMap((n) => (isGroup(n) ? n.children : [n]));
+/** The group label for a leaf id, for search-result context. */
+const GROUP_OF: Record<string, string> = Object.fromEntries(
+  NAV.flatMap((n) => (isGroup(n) ? n.children.map((c) => [c.id, n.label] as const) : [])),
+);
 
 const TOOLCHAIN_KEY = "java.toolchainDir";
 
@@ -101,9 +105,15 @@ interface Props {
 export default function SettingsDialog({ onClose }: Props) {
   const [sel, setSel] = useState<string>("appearance");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
   const current = ALL_LEAVES.find((l) => l.id === sel) ?? ALL_LEAVES[0];
 
   const toggle = (id: string) => setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const q = query.trim().toLowerCase();
+  const results = q
+    ? ALL_LEAVES.filter((l) => `${GROUP_OF[l.id] ?? ""} ${l.label} ${l.keywords ?? ""}`.toLowerCase().includes(q))
+    : [];
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30" onClick={onClose}>
@@ -112,29 +122,60 @@ export default function SettingsDialog({ onClose }: Props) {
           <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">Settings</h2>
         </div>
         <div className="flex min-h-0 flex-1">
-          <nav className="flex w-[200px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[color:var(--line)] p-2">
-            {NAV.map((node) =>
-              isGroup(node) ? (
-                <div key={node.id}>
-                  <button
-                    onClick={() => {
-                      const willOpen = collapsed.has(node.id);
-                      toggle(node.id);
-                      if (willOpen) setSel(node.children[0].id); // opening → focus first child
-                    }}
-                    className="flex w-full items-center gap-1 rounded-md px-1.5 py-1.5 text-left text-[12.5px] font-semibold text-[var(--text-primary)] hover:bg-[var(--hover)]"
-                  >
-                    <Chevron open={!collapsed.has(node.id)} />
-                    {node.label}
-                  </button>
-                  {!collapsed.has(node.id) &&
-                    node.children.map((leaf) => (
-                      <NavItem key={leaf.id} active={sel === leaf.id} onClick={() => setSel(leaf.id)} label={leaf.label} indent />
-                    ))}
-                </div>
+          <nav className="flex w-[200px] shrink-0 flex-col overflow-y-auto border-r border-[color:var(--line)] p-2">
+            <div className="relative mb-1.5">
+              <SearchIcon />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && results.length) { setSel(results[0].id); setQuery(""); } if (e.key === "Escape") setQuery(""); }}
+                placeholder="Search settings…"
+                className="field w-full py-1 pl-7 pr-2 text-[12px]"
+              />
+            </div>
+            {q ? (
+              results.length === 0 ? (
+                <p className="px-2 py-3 text-[11.5px] text-[var(--text-tertiary)]">No matching settings.</p>
               ) : (
-                <NavItem key={node.id} active={sel === node.id} onClick={() => setSel(node.id)} label={node.label} />
-              ),
+                <div className="flex flex-col gap-0.5">
+                  {results.map((leaf) => (
+                    <button
+                      key={leaf.id}
+                      onClick={() => { setSel(leaf.id); setQuery(""); }}
+                      className={`rounded-md px-3 py-1.5 text-left text-[12.5px] ${sel === leaf.id ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "text-[var(--text-secondary)] hover:bg-[var(--hover)]"}`}
+                    >
+                      {GROUP_OF[leaf.id] && <span className="text-[var(--text-tertiary)]">{GROUP_OF[leaf.id]} › </span>}
+                      {leaf.label}
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {NAV.map((node) =>
+                  isGroup(node) ? (
+                    <div key={node.id}>
+                      <button
+                        onClick={() => {
+                          const willOpen = collapsed.has(node.id);
+                          toggle(node.id);
+                          if (willOpen) setSel(node.children[0].id);
+                        }}
+                        className="flex w-full items-center gap-1 rounded-md px-1.5 py-1.5 text-left text-[12.5px] font-semibold text-[var(--text-primary)] hover:bg-[var(--hover)]"
+                      >
+                        <Chevron open={!collapsed.has(node.id)} />
+                        {node.label}
+                      </button>
+                      {!collapsed.has(node.id) &&
+                        node.children.map((leaf) => (
+                          <NavItem key={leaf.id} active={sel === leaf.id} onClick={() => setSel(leaf.id)} label={leaf.label} indent />
+                        ))}
+                    </div>
+                  ) : (
+                    <NavItem key={node.id} active={sel === node.id} onClick={() => setSel(node.id)} label={node.label} />
+                  ),
+                )}
+              </div>
             )}
           </nav>
           <div className="min-w-0 flex-1 overflow-auto p-5">{current.render()}</div>
@@ -164,6 +205,14 @@ function Chevron({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-tertiary)]" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }}>
       <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]">
+      <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
     </svg>
   );
 }
