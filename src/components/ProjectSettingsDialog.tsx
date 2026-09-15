@@ -241,7 +241,8 @@ function SourcesTab({
               <div key={k} className="mb-3">
                 <div className={`mb-1 text-[11.5px] font-semibold ${ROOT_COLOR[k]}`}>{ROOT_GROUP[k]}</div>
                 {items.map((d) => (
-                  <div key={d} className="group flex items-center gap-1 py-0.5">
+                  <div key={d} className="group flex items-center gap-1.5 py-0.5">
+                    <FolderGlyph className={ROOT_COLOR[k]} />
                     <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-[var(--text-primary)]" title={d}>{d || "(root)"}</span>
                     <button
                       onClick={() => setDraft((prev) => { const n = { ...prev }; delete n[d]; return n; })}
