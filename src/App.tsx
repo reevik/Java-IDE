@@ -1202,6 +1202,21 @@ export default function App() {
     }
   }, []);
 
+  // Organize imports on the active Java file (also available as a save action).
+  const organizeImportsActive = useCallback(async () => {
+    const path = activeGroupRef.current === 1 ? secActiveRef.current : activeRef.current;
+    const f = filesRef.current.find((x) => x.path === path);
+    if (!f || f.loading || f.readOnly || !f.path.endsWith(".java") || !projectRef.current) return;
+    try {
+      const next = await organizeImports(projectRef.current, f.path, f.content);
+      if (next && next !== f.content) activeEditor()?.setDoc(next);
+    } catch (e) {
+      setLines((prev) => [...prev.slice(-4000), { stream: "stderr", text: `Organize imports: ${e}` }]);
+      setOutputHidden(false);
+      setOutputTab("output");
+    }
+  }, []);
+
   // rust-analyzer diagnostics as project-wide problems. Unlike cargo-run output,
   // these are republished on startup, so the Problems list / tree dots come back
   // after a restart once the project is re-indexed.
@@ -1589,6 +1604,7 @@ export default function App() {
       { id: "cargo.clippy", group: "Build", title: "Check", hint: "⌘L", disabled: !project, disabledReason: noProject, run: () => void runCargo("clippy") },
       { id: "cargo.check", group: "Code", title: "Code Analysis", hint: "⌘⇧B", disabled: !project, disabledReason: noProject, run: () => void runCargo("check") },
       { id: "code.reformat", group: "Code", title: "Reformat Code", hint: "⌘⌥L", disabled: !active || active.readOnly || !active.path.endsWith(".java"), disabledReason: "Open a Java file", run: () => void reformatActive() },
+      { id: "code.organize-imports", group: "Code", title: "Organize Imports", disabled: !active || active.readOnly || !active.path.endsWith(".java"), disabledReason: "Open a Java file", run: () => void organizeImportsActive() },
       { id: "cargo.fmt", group: "Build", title: "Format project", hint: "⌘⇧F", disabled: !project, disabledReason: noProject, run: () => void runCargo("fmt") },
       { id: "cargo.cancel", group: "Build", title: "Stop", hint: "⌘.", disabled: !running, disabledReason: "Nothing is running", run: () => void cargoCancel() },
       { id: "debug.start", group: "Debug", title: debugStatus === "paused" ? "Continue" : "Start Debugging", hint: "F5", disabled: !project, disabledReason: noProject, run: () => void debugSelectedConfig() },
@@ -1609,10 +1625,16 @@ export default function App() {
       { id: "view.split-right", group: "View", title: "Split Right", disabled: !active, disabledReason: "No file open", run: () => splitEditor("row") },
       { id: "view.split-down", group: "View", title: "Split Down", disabled: !active, disabledReason: "No file open", run: () => splitEditor("col") },
       { id: "view.close-split", group: "View", title: "Close Split", disabled: !split, disabledReason: "No split", run: () => closeSecTabs(secPaths) },
+      { id: "file.new-file", group: "File", title: "New File…", hint: "⌘N", disabled: !project, disabledReason: noProject, run: () => window.dispatchEvent(new CustomEvent("rustade:new", { detail: "file" })) },
+      { id: "file.new-class", group: "File", title: "New Java Class…", disabled: !project, disabledReason: noProject, run: () => window.dispatchEvent(new CustomEvent("rustade:new", { detail: "java" })) },
+      { id: "file.new-dir", group: "File", title: "New Folder…", hint: "⌘⇧N", disabled: !project, disabledReason: noProject, run: () => window.dispatchEvent(new CustomEvent("rustade:new", { detail: "dir" })) },
       { id: "file.save", group: "File", title: "Save", hint: "⌘S", disabled: !active, disabledReason: "No file open", run: () => active && void saveNow(active.path) },
       { id: "file.close-tab", group: "File", title: "Close tab", hint: "⌘W", disabled: !active, disabledReason: "No file open", run: () => active && closeTab(active.path) },
       { id: "view.tree", group: "View", title: treeHidden ? "Show explorer" : "Hide explorer", hint: "⌘⌥1", run: () => setTreeHidden((v) => !v) },
       { id: "view.output", group: "View", title: outputHidden ? "Show output" : "Hide output", hint: "⌘⌥2", run: () => setOutputHidden((v) => !v) },
+      { id: "view.git", group: "View", title: "Show Version Control", disabled: !project, disabledReason: noProject, run: () => { setOutputHidden(false); setOutputTab("git"); } },
+      { id: "view.problems", group: "View", title: "Show Problems", run: () => { setOutputHidden(false); setOutputTab("problems"); } },
+      { id: "view.output-tab", group: "View", title: "Show Build Output", run: () => { setOutputHidden(false); setOutputTab("output"); } },
       { id: "view.ai", group: "View", title: rightPanel === "review" ? "Hide Intelligent Review" : "Intelligent Review", hint: "⌘⌥3", run: () => setRightPanel((p) => (p === "review" ? null : "review")) },
       { id: "view.chat", group: "View", title: rightPanel === "chat" ? "Hide AI Assistant" : "AI Assistant", hint: "⌘⌥4", run: () => setRightPanel((p) => (p === "chat" ? null : "chat")) },
       { id: "view.skills", group: "View", title: rightPanel === "skills" ? "Hide Skills" : "Skills", hint: "⌘⌥5", run: () => setRightPanel((p) => (p === "skills" ? null : "skills")) },
@@ -1624,7 +1646,7 @@ export default function App() {
       { id: "view.palette", group: "View", title: "Command palette", hint: "⌘K", run: () => setShowPalette((v) => !v) },
     ];
     return list;
-  }, [project, running, active, focusedFile, split, secPaths, splitEditor, closeSecTabs, treeHidden, outputHidden, rightPanel, runCargo, saveNow, closeTab, debugStatus, startOrContinue, debugSelectedConfig, stepOver, stepInto, stepOut, stopDebug, reformatActive, selectedConfig, runSelectedConfig, breakpoints, cursor, toggleBreakpoint, removeAllBreakpoints, setAllBreakpointsEnabled]);
+  }, [project, running, active, focusedFile, split, secPaths, splitEditor, closeSecTabs, treeHidden, outputHidden, rightPanel, runCargo, saveNow, closeTab, debugStatus, startOrContinue, debugSelectedConfig, stepOver, stepInto, stepOut, stopDebug, reformatActive, organizeImportsActive, selectedConfig, runSelectedConfig, breakpoints, cursor, toggleBreakpoint, removeAllBreakpoints, setAllBreakpointsEnabled]);
 
   const commandsRef = useRef<Command[]>([]);
   commandsRef.current = commands;

@@ -80,6 +80,8 @@ pub fn run() {
 
             let new_file =
                 MenuItem::with_id(handle, "file.new-file", "New File", true, Some("CmdOrCtrl+N"))?;
+            let new_class =
+                MenuItem::with_id(handle, "file.new-class", "New Java Class…", true, None::<&str>)?;
             let new_dir = MenuItem::with_id(
                 handle,
                 "file.new-dir",
@@ -92,6 +94,7 @@ pub fn run() {
                 MenuItem::with_id(handle, "file.close-tab", "Close Tab", true, Some("CmdOrCtrl+W"))?;
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .item(&new_file)
+                .item(&new_class)
                 .item(&new_dir)
                 .separator()
                 .item(&save)
@@ -137,6 +140,8 @@ pub fn run() {
                 MenuItem::with_id(handle, "code.reformat", "Reformat Code", true, Some("CmdOrCtrl+Alt+L"))?;
             // Refactor This / Go to Line: accelerators (⌃T / ⌃G) are handled in-editor;
             // the menu items are for discoverability.
+            let organize_imports =
+                MenuItem::with_id(handle, "code.organize-imports", "Organize Imports", true, None::<&str>)?;
             let refactor =
                 MenuItem::with_id(handle, "code.refactor", "Refactor This…", true, None::<&str>)?;
             let goto_line = MenuItem::with_id(handle, "code.goto-line", "Go to Line…", true, None::<&str>)?;
@@ -149,6 +154,7 @@ pub fn run() {
             let code_menu = SubmenuBuilder::new(handle, "Code")
                 .item(&code_analysis)
                 .item(&reformat)
+                .item(&organize_imports)
                 .item(&refactor)
                 .separator()
                 .item(&goto_line)
@@ -218,6 +224,8 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Alt+2"),
             )?;
+            let show_git =
+                MenuItem::with_id(handle, "view.git", "Version Control", true, None::<&str>)?;
             let toggle_ai = MenuItem::with_id(
                 handle,
                 "view.ai",
@@ -252,6 +260,7 @@ pub fn run() {
                 .separator()
                 .item(&toggle_tree)
                 .item(&toggle_output)
+                .item(&show_git)
                 .item(&toggle_ai)
                 .item(&toggle_chat)
                 .item(&toggle_skills)

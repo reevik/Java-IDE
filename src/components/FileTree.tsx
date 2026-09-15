@@ -255,6 +255,33 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
     setMenu(null);
   };
 
+  // Palette / native-menu "New File/Folder/Class": open the create prompt at the
+  // selected node's directory (a folder → itself; a file → its parent), else root.
+  useEffect(() => {
+    const dirForNew = (): string => {
+      const findNode = (nodes: TreeNode[]): TreeNode | null => {
+        for (const n of nodes) {
+          if (n.path === selectedPath) return n;
+          const c = n.children ? findNode(n.children) : null;
+          if (c) return c;
+        }
+        return null;
+      };
+      const node = selectedPath ? findNode(tree) : null;
+      if (!node) return rootPath;
+      return node.kind === "dir" ? node.path : parentDir(node.path);
+    };
+    const handler = (e: Event) => {
+      const kind = (e as CustomEvent).detail as NewKind;
+      setPrompt({ dir: dirForNew(), kind });
+      setName("");
+      setErr(null);
+      setMenu(null);
+    };
+    window.addEventListener("rustade:new", handler);
+    return () => window.removeEventListener("rustade:new", handler);
+  }, [tree, selectedPath, rootPath]);
+
   const cutCopy = (mode: "cut" | "copy") => {
     if (!menu || menu.targets.length === 0) return;
     setClip({ mode, paths: menu.targets });
