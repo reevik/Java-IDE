@@ -27,7 +27,41 @@ import { loadSaveActions, saveSaveActions, type SaveActions } from "../lib/saveA
 import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, loadMarginColumn, loadShowMargin, loadWrapAtMargin, saveAppearance, saveFont, saveMargin, type Appearance } from "../lib/theme";
 import { editorThemeOptions, loadEditorTheme, saveEditorTheme } from "../lib/editorThemes";
 
-type Tab = "general" | "appearance" | "java" | "ai" | "tools";
+/** IntelliJ-style settings navigation: top-level leaves and expandable groups
+ *  whose children are leaves. Each leaf renders a panel on the right. */
+interface NavLeaf { id: string; label: string; render: () => React.ReactNode }
+interface NavGroup { id: string; label: string; children: NavLeaf[] }
+type NavNode = NavLeaf | NavGroup;
+const isGroup = (n: NavNode): n is NavGroup => "children" in n;
+
+const NAV: NavNode[] = [
+  { id: "appearance", label: "Appearance", render: () => <AppearanceTab /> },
+  { id: "general", label: "General", render: () => <GeneralTab /> },
+  {
+    id: "editor",
+    label: "Editor",
+    children: [
+      { id: "codestyle", label: "Code Style", render: () => <div><CodeStyleSection /></div> },
+      { id: "saveactions", label: "Save Actions", render: () => <div><SaveActionsSection /></div> },
+    ],
+  },
+  {
+    id: "java",
+    label: "Java",
+    children: [{ id: "jdk", label: "JDK", render: () => <JdkPanel /> }],
+  },
+  {
+    id: "ai",
+    label: "AI",
+    children: [
+      { id: "ai-connectors", label: "Connectors", render: () => <AiConnectorsPanel /> },
+      { id: "ai-model", label: "Model & API", render: () => <AiModelPanel /> },
+    ],
+  },
+  { id: "tools", label: "Tools", render: () => <ToolsTab /> },
+];
+
+const ALL_LEAVES: NavLeaf[] = NAV.flatMap((n) => (isGroup(n) ? n.children : [n]));
 
 const TOOLCHAIN_KEY = "java.toolchainDir";
 
@@ -65,28 +99,45 @@ interface Props {
 }
 
 export default function SettingsDialog({ onClose }: Props) {
-  const [tab, setTab] = useState<Tab>("general");
+  const [sel, setSel] = useState<string>("appearance");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const current = ALL_LEAVES.find((l) => l.id === sel) ?? ALL_LEAVES[0];
+
+  const toggle = (id: string) => setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30" onClick={onClose}>
-      <div className="switch-dialog flex h-[460px] w-[720px] flex-col rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="switch-dialog flex h-[520px] w-[760px] flex-col rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex shrink-0 items-center border-b border-[color:var(--line)] px-4 py-3">
           <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">Settings</h2>
         </div>
         <div className="flex min-h-0 flex-1">
-          <nav className="flex w-[170px] shrink-0 flex-col gap-0.5 border-r border-[color:var(--line)] p-2">
-            <TabItem active={tab === "general"} onClick={() => setTab("general")} label="General" />
-            <TabItem active={tab === "appearance"} onClick={() => setTab("appearance")} label="Appearance" />
-            <TabItem active={tab === "java"} onClick={() => setTab("java")} label="Java" />
-            <TabItem active={tab === "ai"} onClick={() => setTab("ai")} label="AI" />
-            <TabItem active={tab === "tools"} onClick={() => setTab("tools")} label="Tools" />
+          <nav className="flex w-[200px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[color:var(--line)] p-2">
+            {NAV.map((node) =>
+              isGroup(node) ? (
+                <div key={node.id}>
+                  <button
+                    onClick={() => {
+                      const willOpen = collapsed.has(node.id);
+                      toggle(node.id);
+                      if (willOpen) setSel(node.children[0].id); // opening → focus first child
+                    }}
+                    className="flex w-full items-center gap-1 rounded-md px-1.5 py-1.5 text-left text-[12.5px] font-semibold text-[var(--text-primary)] hover:bg-[var(--hover)]"
+                  >
+                    <Chevron open={!collapsed.has(node.id)} />
+                    {node.label}
+                  </button>
+                  {!collapsed.has(node.id) &&
+                    node.children.map((leaf) => (
+                      <NavItem key={leaf.id} active={sel === leaf.id} onClick={() => setSel(leaf.id)} label={leaf.label} indent />
+                    ))}
+                </div>
+              ) : (
+                <NavItem key={node.id} active={sel === node.id} onClick={() => setSel(node.id)} label={node.label} />
+              ),
+            )}
           </nav>
-          <div className="min-w-0 flex-1 overflow-auto p-5">
-            {tab === "general" && <GeneralTab />}
-            {tab === "appearance" && <AppearanceTab />}
-            {tab === "java" && <JavaTab />}
-            {tab === "ai" && <AiTab />}
-            {tab === "tools" && <ToolsTab />}
-          </div>
+          <div className="min-w-0 flex-1 overflow-auto p-5">{current.render()}</div>
         </div>
         <div className="flex shrink-0 items-center justify-end border-t border-[color:var(--line)] px-4 py-3">
           <button onClick={onClose} className="btn-accent px-3 py-1.5 text-[12.5px]">Done</button>
@@ -96,16 +147,24 @@ export default function SettingsDialog({ onClose }: Props) {
   );
 }
 
-function TabItem({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function NavItem({ active, onClick, label, indent }: { active: boolean; onClick: () => void; label: string; indent?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-md px-3 py-1.5 text-left text-[12.5px] font-medium ${
-        active ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "text-[var(--text-secondary)] hover:bg-[var(--hover)]"
+      className={`rounded-md py-1.5 text-left text-[12.5px] ${indent ? "pl-6 pr-3" : "px-3 font-medium"} ${
+        active ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-strong)]" : "text-[var(--text-secondary)] hover:bg-[var(--hover)]"
       }`}
     >
       {label}
     </button>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-tertiary)]" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }}>
+      <path d="M9 6l6 6-6 6" />
+    </svg>
   );
 }
 
@@ -330,7 +389,7 @@ function ThemeSwatch({ kind }: { kind: Appearance }) {
 
 // --- JDK / toolchain --------------------------------------------------------
 
-function JavaTab() {
+function JdkPanel() {
   const qc = useQueryClient();
   const { data: info } = useQuery({ queryKey: ["toolchain-info"], queryFn: toolchainInfo });
   const { data: jdks } = useQuery({ queryKey: ["detected-jdks"], queryFn: detectedJdks });
@@ -411,10 +470,6 @@ function JavaTab() {
           A JDK’s <code className="font-mono">bin</code> directory, for JDKs not listed above. “Auto” falls back to the JDK on your <code className="font-mono">PATH</code>.
         </p>
       </Section>
-
-      <CodeStyleSection />
-
-      <SaveActionsSection />
 
       <Section title="Active">
         <Row label="Java version" value={info?.version ? info.version : "—"} />
@@ -681,7 +736,18 @@ function ConnectorRow({ selected, disabled, onSelect, label, detail, available, 
   );
 }
 
-function AiTab() {
+/** The AI Connectors leaf. */
+function AiConnectorsPanel() {
+  return (
+    <div>
+      <Section title="AI Connectors">
+        <ConnectorsSection />
+      </Section>
+    </div>
+  );
+}
+
+function AiModelPanel() {
   const qc = useQueryClient();
   const { data: settings } = useQuery({ queryKey: ["ai-settings"], queryFn: aiSettings });
   const [model, setModelState] = useState<string>(loadModel());
@@ -713,10 +779,6 @@ function AiTab() {
 
   return (
     <div>
-      <Section title="AI Connectors">
-        <ConnectorsSection />
-      </Section>
-
       <Section title="Model">
         <select
           value={custom ? "__custom__" : model}
