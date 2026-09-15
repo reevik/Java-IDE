@@ -22,6 +22,7 @@ import SkillsPanel from "./components/SkillsPanel";
 import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
+import SpringView from "./components/SpringView";
 import RunConfigDialog from "./components/RunConfigDialog";
 import SettingsDialog, { loadModel, loadPreferredConnector, loadToolchainDir } from "./components/SettingsDialog";
 import { bindingIndex, isRecordingKeymap, resolvedBindings, shortcutFromEvent, shortcutId } from "./lib/keymap";
@@ -61,6 +62,7 @@ import {
   listTests,
   runJavaMain,
   springMains,
+  springOverview,
   openProjectWindow,
   setModel,
   setPreferredConnector,
@@ -213,7 +215,7 @@ export default function App() {
   const [keymapVer, setKeymapVer] = useState(0);
   const [gotoLine, setGotoLine] = useState(false);
   const [runMenu, setRunMenu] = useState<{ run: Runnable; path: string; x: number; y: number } | null>(null);
-  const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies" | "maven">("project");
+  const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies" | "maven" | "spring">("project");
 
   // Apply persisted AI model + toolchain overrides to the backend on startup.
   useEffect(() => {
@@ -239,6 +241,13 @@ export default function App() {
     enabled: !!project && editingConfigs,
     staleTime: 30_000,
   });
+  const { data: spring } = useQuery({
+    queryKey: ["spring", project?.path],
+    queryFn: () => springOverview(project!.path),
+    enabled: !!project,
+    staleTime: 60_000,
+  });
+  const isSpring = ((spring?.beans.length ?? 0) + (spring?.endpoints.length ?? 0)) > 0;
 
   // Debugger state
   const [breakpoints, setBreakpoints] = useState<BreakpointMap>({});
@@ -1907,6 +1916,9 @@ export default function App() {
                     icon={buildTool === "maven" ? <MavenLogo size={18} /> : <GradleLogo size={18} />}
                   />
                 )}
+                {isSpring && (
+                  <RailTab active={leftTab === "spring"} onClick={() => setLeftTab("spring")} title="Spring (Beans & Endpoints)" icon={<SpringLeafIcon />} />
+                )}
               </nav>
               <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-1">
                 {leftTab === "project" ? (
@@ -1929,6 +1941,8 @@ export default function App() {
                   <ModulesView root={project.path} activePath={activePath} onOpen={(p, line) => void jumpTo(p, line ?? 1, 1)} />
                 ) : leftTab === "maven" && buildTool ? (
                   <BuildView tool={buildTool} running={running} onRun={(goals) => void runGoal(goals)} onStop={() => void cargoCancel()} />
+                ) : leftTab === "spring" ? (
+                  <SpringView root={project.path} onOpen={(p, line) => void jumpTo(p, line, 1)} />
                 ) : (
                   <DependenciesView root={project.path} />
                 )}
@@ -2435,6 +2449,15 @@ function DepsRailIcon() {
       <circle cx="18" cy="9" r="2.5" />
       <circle cx="9" cy="18" r="2.5" />
       <path d="M8 7l7.5 1.6M7.5 8.2 8.6 15.5" />
+    </svg>
+  );
+}
+
+function SpringLeafIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" className="text-[#6db33f]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.5 4a11 11 0 0 1-2 14.4c-3.7 3.4-9.6 3.4-13.2-.2C2.6 15.2 2.7 9.7 5.7 6.7 8 4.4 11.8 3.9 14.5 5.6" />
+      <path d="M12 12.5c3.3-3.3 7.6-3.3 9.8-2.2" />
     </svg>
   );
 }

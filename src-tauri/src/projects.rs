@@ -337,7 +337,7 @@ fn fqcn_of(src: &str, file: &Path) -> Option<String> {
 }
 
 /// Source roots to scan: `<root>/src/main/java` plus each module's, if any.
-fn java_source_roots(dir: &Path) -> Vec<PathBuf> {
+pub fn java_source_roots(dir: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let here = dir.join("src/main/java");
     if here.is_dir() {

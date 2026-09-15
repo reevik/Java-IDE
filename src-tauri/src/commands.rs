@@ -1009,6 +1009,17 @@ pub fn spring_mains(root: String, state: State<'_, AppState>) -> Result<Vec<Stri
     Ok(projects::find_spring_mains(&d))
 }
 
+/// The project's Spring model — stereotype beans, @Bean methods, and REST
+/// endpoints — for the Spring panel.
+#[tauri::command]
+pub async fn spring_overview(root: String, state: State<'_, AppState>) -> Result<crate::spring::SpringOverview, String> {
+    let d = PathBuf::from(&root);
+    ensure_within_projects(&d, &state)?;
+    tokio::task::spawn_blocking(move || crate::spring::overview(&d))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // --- Files ------------------------------------------------------------------
 
 #[tauri::command]

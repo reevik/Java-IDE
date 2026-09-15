@@ -309,6 +309,15 @@ export function springMains(root: string): Promise<string[]> {
   return invoke("spring_mains", { root });
 }
 
+export interface SpringBean { name: string; kind: string; owner: string; path: string; line: number }
+export interface SpringEndpoint { method: string; path: string; handler: string; file: string; line: number }
+export interface SpringOverview { beans: SpringBean[]; endpoints: SpringEndpoint[] }
+
+/** The project's Spring model: stereotype beans, @Bean methods, REST endpoints. */
+export function springOverview(root: string): Promise<SpringOverview> {
+  return invoke("spring_overview", { root });
+}
+
 /** Stage the given repo-relative paths (`git add`). */
 export function gitStage(root: string, paths: string[]): Promise<void> {
   return invoke("git_stage", { root, paths });

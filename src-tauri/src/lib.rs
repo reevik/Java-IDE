@@ -7,6 +7,7 @@ mod llm;
 mod lsp;
 mod projects;
 mod search;
+mod spring;
 mod toolchain;
 
 use projects::ProjectRef;
@@ -410,6 +411,7 @@ pub fn run() {
             commands::read_project_tree,
             commands::detect_source_roots_cmd,
             commands::spring_mains,
+            commands::spring_overview,
             commands::read_file,
             commands::write_file,
             commands::read_text_file,
