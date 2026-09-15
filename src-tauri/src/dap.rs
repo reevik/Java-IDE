@@ -37,10 +37,22 @@ pub struct SourceBp {
 /// running) with guidance the raw message doesn't give.
 fn describe_launch_error(msg: &str) -> String {
     let low = msg.to_ascii_lowercase();
+    // Remote attach couldn't reach the target JVM.
+    if low.contains("connection refused")
+        || low.contains("connect timed out")
+        || low.contains("connection timed out")
+        || low.contains("no route to host")
+        || low.contains("unknownhost")
+        || low.contains("connexception")
+    {
+        return format!(
+            "couldn't reach the target JVM. Make sure it's started with the JDWP agent \
+             (-agentlib:jdwp=…,address=*:<port>) and that the host/port are reachable.\n\nAdapter said: {msg}"
+        );
+    }
     let port_busy = low.contains("address already in use")
         || low.contains("bindexception")
         || low.contains("already in use")
-        || low.contains("failed to attach")
         || (low.contains("port") && low.contains("in use"));
     if port_busy {
         format!(
@@ -49,7 +61,7 @@ fn describe_launch_error(msg: &str) -> String {
              debugging again.\n\nAdapter said: {msg}"
         )
     } else {
-        format!("launch failed: {msg}")
+        msg.to_string()
     }
 }
 
@@ -273,28 +285,49 @@ impl DapClient {
         // The config is built by the caller. Its `request` field selects the DAP
         // command: "launch" (start a JVM) or "attach" (connect to a remote one).
         let req_kind = launch.get("request").and_then(Value::as_str).unwrap_or("launch").to_string();
-        let launch_rx = client.send(&req_kind, launch).await?;
+        let mut launch_rx = client.send(&req_kind, launch).await?;
 
-        // The adapter is ready for breakpoints once it emits `initialized`.
-        let _ = tokio::time::timeout(Duration::from_secs(15), client.initialized.notified()).await;
+        // Wait for the adapter to be ready (`initialized`) OR for the request to
+        // answer early — an attach that can't reach the target JVM reports the
+        // real reason (e.g. "Connection refused") in its response, sometimes
+        // before/without `initialized`. Surface that instead of a later
+        // configurationDone timeout.
+        let mut response: Option<Value> = None;
+        tokio::select! {
+            _ = client.initialized.notified() => {}
+            r = &mut launch_rx => { response = r.ok(); }
+            _ = tokio::time::sleep(Duration::from_secs(20)) => {}
+        }
+        if let Some(resp) = &response {
+            if resp.get("success").and_then(Value::as_bool) != Some(true) {
+                let msg = resp.get("message").and_then(Value::as_str).unwrap_or("attach failed");
+                bail!("{}", describe_launch_error(msg));
+            }
+        }
+
         for (path, bps) in breakpoints {
             if !bps.is_empty() {
                 let _ = client.set_breakpoints(path, bps).await;
             }
         }
-        client
-            .request("configurationDone", json!({}), Duration::from_secs(10))
-            .await
-            .context("configurationDone")?;
-
-        // Now the deferred launch response should arrive.
-        match tokio::time::timeout(Duration::from_secs(30), launch_rx).await {
-            Ok(Ok(resp)) if resp.get("success").and_then(Value::as_bool) == Some(true) => {}
-            Ok(Ok(resp)) => {
-                let msg = resp.get("message").and_then(Value::as_str).unwrap_or("launch failed");
-                bail!("{}", describe_launch_error(msg));
+        if let Err(e) = client.request("configurationDone", json!({}), Duration::from_secs(10)).await {
+            // If the request already returned success (attach), a configurationDone
+            // hiccup shouldn't sink the session; otherwise it's a real failure.
+            if response.is_none() {
+                return Err(e).context("configurationDone");
             }
-            _ => bail!("launch timed out"),
+        }
+
+        // Await the deferred response if it hasn't already arrived.
+        if response.is_none() {
+            match tokio::time::timeout(Duration::from_secs(30), launch_rx).await {
+                Ok(Ok(resp)) if resp.get("success").and_then(Value::as_bool) == Some(true) => {}
+                Ok(Ok(resp)) => {
+                    let msg = resp.get("message").and_then(Value::as_str).unwrap_or("launch failed");
+                    bail!("{}", describe_launch_error(msg));
+                }
+                _ => bail!("{req_kind} timed out"),
+            }
         }
         Ok(client)
     }
