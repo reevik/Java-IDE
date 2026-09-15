@@ -289,6 +289,22 @@ pub async fn run_java_app(
     let java = crate::toolchain::java_home()
         .map(|h| format!("{h}/bin/java"))
         .unwrap_or_else(|| "java".to_string());
+
+    // Report the JVM in use (path + `java -version`'s first line, which it prints
+    // to stderr) so it's clear which JDK the app runs on.
+    let version = tokio::process::Command::new(&java)
+        .arg("-version")
+        .output()
+        .await
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stderr).lines().next().map(|l| l.trim().to_string()))
+        .filter(|s| !s.is_empty());
+    let jvm_line = match version {
+        Some(v) => format!("JVM: {java}  ·  {v}"),
+        None => format!("JVM: {java}"),
+    };
+    let _ = app.emit("cargo:event", CargoEvent::Line { stream: "stdout".into(), text: jvm_line });
+
     let mut args = vec!["-cp".to_string(), cp.join(":"), main_class.to_string()];
     args.extend(prog_args);
     let _ = app.emit(
