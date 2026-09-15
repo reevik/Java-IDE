@@ -2455,7 +2455,7 @@ function DepsRailIcon() {
 
 function SpringLeafIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" className="text-[#6db33f]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="18" height="18" className="spring-leaf" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M20.5 4a11 11 0 0 1-2 14.4c-3.7 3.4-9.6 3.4-13.2-.2C2.6 15.2 2.7 9.7 5.7 6.7 8 4.4 11.8 3.9 14.5 5.6" />
       <path d="M12 12.5c3.3-3.3 7.6-3.3 9.8-2.2" />
     </svg>

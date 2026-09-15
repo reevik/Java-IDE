@@ -1063,6 +1063,10 @@ select.field option {
   color: var(--accent-strong);
   background: var(--accent-soft);
 }
+/* Spring rail icon: grey when idle, Spring-green on hover or when active. */
+.nav-rail-btn .spring-leaf { color: var(--text-tertiary); }
+.nav-rail-btn:hover .spring-leaf,
+.nav-rail-btn-active .spring-leaf { color: #6db33f; }
 /* Accent marker on the left edge (the window edge). */
 .nav-rail-btn-active::after {
   content: "";
