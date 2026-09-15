@@ -2421,9 +2421,9 @@ function DepsRailIcon() {
 
 function HammerIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-secondary)]">
-      <path d="M14 6l4 4M3 21l7.5-7.5M12.5 8.5l3-3 1-1a2.8 2.8 0 0 1 4 4l-1 1-3 3-4-4z" />
-      <path d="M9 11l4 4-1.5 1.5a2 2 0 0 1-3 0l-1-1a2 2 0 0 1 0-3z" />
+    <svg viewBox="0 0 512 512" width="14" height="14" fill="none" stroke="currentColor" className="shrink-0 text-[var(--text-secondary)]">
+      <path d="M393.87,190a32.1,32.1,0,0,1-45.25,0l-26.57-26.57a32.09,32.09,0,0,1,0-45.26L382.19,58a1,1,0,0,0-.3-1.64c-38.82-16.64-89.15-8.16-121.11,23.57-30.58,30.35-32.32,76-21.12,115.84a31.93,31.93,0,0,1-9.06,32.08L64,380a48.17,48.17,0,1,0,68,68L285.86,281a31.93,31.93,0,0,1,31.6-9.13C357,282.46,402,280.47,432.18,250.68c32.49-32,39.5-88.56,23.75-120.93a1,1,0,0,0-1.6-.26Z" strokeLinecap="round" strokeMiterlimit="10" strokeWidth="32" />
+      <circle cx="96" cy="416" r="16" fill="currentColor" stroke="none" />
     </svg>
   );
 }
