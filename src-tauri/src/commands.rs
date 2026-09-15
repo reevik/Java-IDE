@@ -1029,7 +1029,9 @@ pub fn read_file(path: String, state: State<'_, AppState>) -> Result<String, Str
     // Reads are also allowed for dependency/toolchain source, so Go to Definition
     // can open std and crate sources (which live outside the project).
     ensure_readable(&p, &state)?;
-    fs_tree::read_file(&p).map_err(|e| e.to_string())
+    // `{:#}` includes the whole cause chain (e.g. "reading …: No such file or
+    // directory") instead of just the outermost context.
+    fs_tree::read_file(&p).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
