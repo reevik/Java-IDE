@@ -116,9 +116,12 @@ pub fn run() {
             // ⌘⇧F is Find in Files (VS Code); format takes ⇧⌥F (also VS Code).
             let fmt = MenuItem::with_id(handle, "cargo.fmt", "Format Project", true, Some("Alt+Shift+F"))?;
             let cancel = MenuItem::with_id(handle, "cargo.cancel", "Stop", true, Some("CmdOrCtrl+."))?;
+            let edit_configs =
+                MenuItem::with_id(handle, "run.edit", "Edit Run Configurations…", true, None::<&str>)?;
             let cargo_menu = SubmenuBuilder::new(handle, "Build")
                 .item(&build)
                 .item(&run_it)
+                .item(&edit_configs)
                 .item(&test)
                 .item(&clippy)
                 .separator()
@@ -132,6 +135,11 @@ pub fn run() {
                 MenuItem::with_id(handle, "cargo.check", "Code Analysis", true, Some("CmdOrCtrl+Shift+B"))?;
             let reformat =
                 MenuItem::with_id(handle, "code.reformat", "Reformat Code", true, Some("CmdOrCtrl+Alt+L"))?;
+            // Refactor This / Go to Line: accelerators (⌃T / ⌃G) are handled in-editor;
+            // the menu items are for discoverability.
+            let refactor =
+                MenuItem::with_id(handle, "code.refactor", "Refactor This…", true, None::<&str>)?;
+            let goto_line = MenuItem::with_id(handle, "code.goto-line", "Go to Line…", true, None::<&str>)?;
             // Code folding (the ⌘⌥[ / ⌘⌥] keys are handled in-editor by foldKeymap;
             // the menu items are for discoverability + fold-all/unfold-all).
             let fold = MenuItem::with_id(handle, "code.fold", "Fold at Cursor", true, None::<&str>)?;
@@ -141,6 +149,9 @@ pub fn run() {
             let code_menu = SubmenuBuilder::new(handle, "Code")
                 .item(&code_analysis)
                 .item(&reformat)
+                .item(&refactor)
+                .separator()
+                .item(&goto_line)
                 .separator()
                 .item(&fold)
                 .item(&unfold)
@@ -221,6 +232,13 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Alt+4"),
             )?;
+            let toggle_skills = MenuItem::with_id(
+                handle,
+                "view.skills",
+                "Toggle Skills",
+                true,
+                Some("CmdOrCtrl+Alt+5"),
+            )?;
             let split_right =
                 MenuItem::with_id(handle, "view.split-right", "Split Right", true, None::<&str>)?;
             let split_down =
@@ -236,6 +254,7 @@ pub fn run() {
                 .item(&toggle_output)
                 .item(&toggle_ai)
                 .item(&toggle_chat)
+                .item(&toggle_skills)
                 .separator()
                 .item(&split_right)
                 .item(&split_down)
@@ -249,7 +268,15 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Shift+O"),
             )?;
-            let project_menu = SubmenuBuilder::new(handle, "Project").item(&open_project).build()?;
+            let project_settings =
+                MenuItem::with_id(handle, "project.settings", "Project Settings…", true, None::<&str>)?;
+            let task_board = MenuItem::with_id(handle, "view.taskboard", "Task Board…", true, None::<&str>)?;
+            let project_menu = SubmenuBuilder::new(handle, "Project")
+                .item(&open_project)
+                .separator()
+                .item(&project_settings)
+                .item(&task_board)
+                .build()?;
 
             let close_window = MenuItem::with_id(
                 handle,
