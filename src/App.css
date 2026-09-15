@@ -1316,19 +1316,20 @@ select.field option {
 
 /* Rendered diagram blocks (mermaid / PlantUML). */
 .md-cm .cm-diagram {
+  position: relative;
   margin: 10px 0;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-2);
-  overflow-x: auto;
   cursor: text;
-  text-align: center;
   color: var(--text-tertiary);
   font-size: 12px;
 }
-.md-cm .cm-diagram svg { max-width: 100%; height: auto; }
-.md-cm .cm-diagram-img { max-width: 100%; height: auto; }
+.md-cm .cm-diagram-scroll { overflow: auto; text-align: center; }
+.md-cm .cm-diagram-stage { display: inline-block; min-width: 100%; }
+.md-cm .cm-diagram svg,
+.md-cm .cm-diagram-img { height: auto; }
 .md-cm .cm-diagram-error {
   margin: 0;
   text-align: left;
@@ -1337,6 +1338,38 @@ select.field option {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11.5px;
 }
+
+/* Zoom toolbar (top-right, on hover). */
+.md-cm .cm-diagram-tools {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--control-bg, var(--surface-1));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.md-cm .cm-diagram:hover .cm-diagram-tools { opacity: 1; }
+.md-cm .cm-diagram-btn {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.md-cm .cm-diagram-btn:hover { background: var(--hover); color: var(--text-primary); }
+.md-cm .cm-diagram-reset { min-width: 40px; font-size: 10.5px; font-variant-numeric: tabular-nums; }
 
 /* Markdown preview (Markdown editor's rendered pane). */
 .md-preview {

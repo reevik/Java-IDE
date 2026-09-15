@@ -252,38 +252,85 @@ class DiagramWidget extends WidgetType {
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "cm-diagram md-preview";
-    const reveal = (e: MouseEvent) => {
+
+    // Zoom toolbar (top-right, on hover).
+    const bar = document.createElement("div");
+    bar.className = "cm-diagram-tools";
+    bar.addEventListener("mousedown", (e) => e.stopPropagation());
+
+    const scroll = document.createElement("div");
+    scroll.className = "cm-diagram-scroll";
+    const stage = document.createElement("div");
+    stage.className = "cm-diagram-stage";
+    stage.textContent = "Rendering diagram…";
+    scroll.appendChild(stage);
+
+    // Click on the diagram (not the toolbar) reveals the source for editing.
+    scroll.addEventListener("mousedown", (e) => {
       if ((e.target as HTMLElement).closest("a")) return;
       e.preventDefault();
       const pos = view.posAtDOM(wrap);
       view.dispatch({ selection: { anchor: pos } });
       view.focus();
+    });
+
+    let zoom = 1;
+    let base = 0;
+    const apply = () => {
+      const el = stage.querySelector("svg, img") as HTMLElement | null;
+      if (el && base) el.style.width = `${Math.round(base * zoom)}px`;
+      label.textContent = `${Math.round(zoom * 100)}%`;
     };
-    wrap.addEventListener("mousedown", reveal);
+    const mk = (txt: string, title: string, fn: () => void) => {
+      const b = document.createElement("button");
+      b.className = "cm-diagram-btn";
+      b.type = "button";
+      b.textContent = txt;
+      b.title = title;
+      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      return b;
+    };
+    bar.appendChild(mk("−", "Zoom out", () => { zoom = Math.max(0.25, +(zoom - 0.25).toFixed(2)); apply(); }));
+    const label = mk("100%", "Reset zoom", () => { zoom = 1; apply(); });
+    label.classList.add("cm-diagram-reset");
+    bar.appendChild(label);
+    bar.appendChild(mk("+", "Zoom in", () => { zoom = Math.min(4, +(zoom + 0.25).toFixed(2)); apply(); }));
+
+    wrap.appendChild(bar);
+    wrap.appendChild(scroll);
 
     const fail = (msg: string) => {
-      wrap.innerHTML = "";
+      bar.remove();
+      stage.innerHTML = "";
       const pre = document.createElement("pre");
       pre.className = "cm-diagram-error";
       pre.textContent = `${msg}\n\n${this.code}`;
-      wrap.appendChild(pre);
+      stage.appendChild(pre);
     };
 
     if (this.lang === "mermaid") {
-      wrap.textContent = "Rendering diagram…";
       const id = `mmd-${diagramSeq++}`;
       loadMermaid()
         .then((m) => m.render(id, this.code))
-        .then(({ svg }: { svg: string }) => { wrap.innerHTML = svg; wrap.addEventListener("mousedown", reveal); })
+        .then(({ svg }: { svg: string }) => {
+          stage.innerHTML = svg;
+          const el = stage.querySelector("svg");
+          if (el) {
+            base = el.viewBox?.baseVal?.width || el.getBoundingClientRect().width || 640;
+            el.removeAttribute("height");
+            el.style.maxWidth = "none";
+            apply();
+          }
+        })
         .catch((e: unknown) => fail(`Mermaid error: ${e instanceof Error ? e.message : String(e)}`));
     } else {
       const img = document.createElement("img");
       img.className = "cm-diagram-img";
       img.alt = "PlantUML diagram";
       img.loading = "lazy";
+      img.onload = () => { base = img.naturalWidth || 640; stage.textContent = ""; stage.appendChild(img); apply(); };
       img.onerror = () => fail("PlantUML: couldn't render (server unreachable?)");
       img.src = plantumlUrl(this.code);
-      wrap.appendChild(img);
     }
     return wrap;
   }
