@@ -1,11 +1,28 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import {
+  KEY_ACTIONS,
+  TEMPLATE_NAMES,
+  exportKeymap,
+  importKeymap,
+  loadCustom,
+  loadTemplate,
+  resolvedDisplay,
+  saveCustom,
+  saveTemplate,
+  setRecordingKeymap,
+  shortcutFromEvent,
+  shortcutToDisplay,
+  type KeyAction,
+} from "../lib/keymap";
 import {
   aiSettings,
   appVersion,
   detectAiConnectors,
   detectedJdks,
+  readTextFile,
+  writeTextFile,
   setLlmApiKey,
   setCodeStyle,
   setModel,
@@ -38,6 +55,7 @@ const isGroup = (n: NavNode): n is NavGroup => "children" in n;
 const NAV: NavNode[] = [
   { id: "appearance", label: "Appearance", render: () => <AppearanceTab />, keywords: "theme dark light color scheme editor font size family right margin wrap" },
   { id: "general", label: "General", render: () => <GeneralTab />, keywords: "about version layout tabs" },
+  { id: "keymap", label: "Keymap", render: () => <KeymapPanel />, keywords: "keymap keyboard shortcut binding intellij netbeans import export template" },
   {
     id: "editor",
     label: "Editor",
@@ -770,6 +788,103 @@ function ConnectorRow({ selected, disabled, onSelect, label, detail, available, 
       </span>
       {!available && <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">not found</span>}
     </button>
+  );
+}
+
+function KeymapPanel() {
+  const [template, setTemplate] = useState(loadTemplate());
+  const [custom, setCustom] = useState<Record<string, string>>(loadCustom());
+  const [query, setQuery] = useState("");
+  const [recording, setRecording] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const notify = () => window.dispatchEvent(new Event("rustade:keymap"));
+  const applyCustom = (c: Record<string, string>) => { setCustom(c); saveCustom(c); notify(); };
+  const changeTemplate = (t: string) => { setTemplate(t); saveTemplate(t); notify(); };
+  const resetBinding = (id: string) => { const c = { ...custom }; delete c[id]; applyCustom(c); };
+
+  // Capture the next keystroke as the binding for `recording`.
+  useEffect(() => {
+    if (!recording) return;
+    setRecordingKeymap(true);
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") { setRecording(null); return; }
+      if (e.key === "Backspace" || e.key === "Delete") { applyCustom({ ...custom, [recording]: "" }); setRecording(null); return; }
+      const s = shortcutFromEvent(e);
+      if (!s) return; // modifier-only — keep waiting
+      applyCustom({ ...custom, [recording]: shortcutToDisplay(s) });
+      setRecording(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => { setRecordingKeymap(false); window.removeEventListener("keydown", onKey, true); };
+  }, [recording]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const q = query.trim().toLowerCase();
+  const groups: Record<string, KeyAction[]> = {};
+  for (const a of KEY_ACTIONS) {
+    if (q && !`${a.group} ${a.label}`.toLowerCase().includes(q)) continue;
+    (groups[a.group] ??= []).push(a);
+  }
+
+  const doExport = async () => {
+    const path = await save({ defaultPath: "keymap.json", filters: [{ name: "Keymap", extensions: ["json"] }] });
+    if (typeof path !== "string") return;
+    try { await writeTextFile(path, exportKeymap()); setMsg("Exported."); } catch (e) { setMsg(`Export failed: ${e}`); }
+  };
+  const doImport = async () => {
+    const picked = await open({ multiple: false, filters: [{ name: "Keymap", extensions: ["json"] }] });
+    if (typeof picked !== "string") return;
+    try {
+      const err = importKeymap(await readTextFile(picked));
+      if (err) { setMsg(`Import failed: ${err}`); return; }
+      setTemplate(loadTemplate()); setCustom(loadCustom()); notify(); setMsg("Imported.");
+    } catch (e) { setMsg(`Import failed: ${e}`); }
+  };
+
+  return (
+    <div>
+      <Section title="Keymap">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-[var(--text-secondary)]">Base template</span>
+          <Select value={template} onChange={changeTemplate} className="field px-2 py-1 text-[12px]" options={TEMPLATE_NAMES.map((n) => ({ value: n, label: n }))} />
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={() => void doImport()} className="btn-bezel px-2.5 py-1 text-[11.5px]">Import…</button>
+            <button onClick={() => void doExport()} className="btn-bezel px-2.5 py-1 text-[11.5px]">Export…</button>
+            {Object.keys(custom).length > 0 && <button onClick={() => applyCustom({})} className="btn-bezel px-2.5 py-1 text-[11.5px]">Reset all</button>}
+          </div>
+        </div>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search actions…" className="field mt-2 w-full px-2 py-1.5 text-[12px]" />
+        <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+          {msg ?? "Click a shortcut to record a new one. While recording: Esc cancels, Delete unbinds."}
+        </p>
+      </Section>
+
+      {Object.entries(groups).map(([g, actions]) => (
+        <Section key={g} title={g}>
+          <div className="flex flex-col gap-0.5">
+            {actions.map((a) => {
+              const disp = resolvedDisplay(a.id, template, custom);
+              const isCustom = a.id in custom;
+              return (
+                <div key={a.id} className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-[var(--hover)]">
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--text-primary)]">{a.label}</span>
+                  {isCustom && <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--accent-strong)]">custom</span>}
+                  <button
+                    onClick={() => setRecording(a.id)}
+                    className={`min-w-[92px] rounded border px-2 py-0.5 text-center text-[11.5px] ${recording === a.id ? "border-[color:var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "border-[color:var(--line)] font-mono text-[var(--text-secondary)]"}`}
+                  >
+                    {recording === a.id ? "Press keys…" : disp || "—"}
+                  </button>
+                  <button onClick={() => resetBinding(a.id)} title="Reset to template" disabled={!isCustom} className="rounded p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] disabled:opacity-30">↺</button>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      ))}
+    </div>
   );
 }
 

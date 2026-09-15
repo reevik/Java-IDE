@@ -24,6 +24,7 @@ import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
 import RunConfigDialog from "./components/RunConfigDialog";
 import SettingsDialog, { loadModel, loadPreferredConnector, loadToolchainDir } from "./components/SettingsDialog";
+import { bindingIndex, isRecordingKeymap, resolvedBindings, shortcutFromEvent, shortcutId } from "./lib/keymap";
 import TaskBoardDialog from "./components/TaskBoardDialog";
 import { loadCodeStyle } from "./lib/codeStyle";
 import { loadSaveActions } from "./lib/saveActions";
@@ -209,6 +210,7 @@ export default function App() {
   const [editingConfigs, setEditingConfigs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showBoard, setShowBoard] = useState(false);
+  const [keymapVer, setKeymapVer] = useState(0);
   const [gotoLine, setGotoLine] = useState(false);
   const [runMenu, setRunMenu] = useState<{ run: Runnable; path: string; x: number; y: number } | null>(null);
   const [leftTab, setLeftTab] = useState<"project" | "modules" | "dependencies" | "maven">("project");
@@ -1645,8 +1647,14 @@ export default function App() {
       { id: "view.search", group: "Search", title: "Find in files…", hint: "⌘⇧F", disabled: !project, disabledReason: "Open a project first", run: () => setShowSearch(true) },
       { id: "view.palette", group: "View", title: "Command palette", hint: "⌘K", run: () => setShowPalette((v) => !v) },
     ];
+    // Show each command's shortcut from the active keymap (template + custom).
+    const kb = resolvedBindings();
+    for (const c of list) {
+      if (c.id in kb) c.hint = kb[c.id] || undefined;
+    }
     return list;
-  }, [project, running, active, focusedFile, split, secPaths, splitEditor, closeSecTabs, treeHidden, outputHidden, rightPanel, runCargo, saveNow, closeTab, debugStatus, startOrContinue, debugSelectedConfig, stepOver, stepInto, stepOut, stopDebug, reformatActive, organizeImportsActive, selectedConfig, runSelectedConfig, breakpoints, cursor, toggleBreakpoint, removeAllBreakpoints, setAllBreakpointsEnabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, running, active, focusedFile, split, secPaths, splitEditor, closeSecTabs, treeHidden, outputHidden, rightPanel, runCargo, saveNow, closeTab, debugStatus, startOrContinue, debugSelectedConfig, stepOver, stepInto, stepOut, stopDebug, reformatActive, organizeImportsActive, selectedConfig, runSelectedConfig, breakpoints, cursor, toggleBreakpoint, removeAllBreakpoints, setAllBreakpointsEnabled, keymapVer]);
 
   const commandsRef = useRef<Command[]>([]);
   commandsRef.current = commands;
@@ -1660,38 +1668,28 @@ export default function App() {
     };
   }, []);
 
-  // ⌘⇧P palette, ⌘⇧F find-in-files, plus command shortcuts (⌘⇧A review,
-  // ⌘⇧B code analysis) that only appear as hints in the palette otherwise.
+  // Configurable keymap: a global handler resolves the active template + custom
+  // overrides to shortcuts and runs the matching command. Recomputes when the
+  // Keymap settings change (the "rustade:keymap" event).
+  const keymapIdxRef = useRef<Record<string, string>>(bindingIndex());
   useEffect(() => {
-    const runCmd = (id: string) => {
+    const recompute = () => { keymapIdxRef.current = bindingIndex(); setKeymapVer((v) => v + 1); };
+    const onKeymap = () => recompute();
+    window.addEventListener("rustade:keymap", onKeymap);
+    const onKey = (e: KeyboardEvent) => {
+      if (isRecordingKeymap()) return;
+      const s = shortcutFromEvent(e);
+      if (!s) return;
+      const id = keymapIdxRef.current[shortcutId(s)];
+      if (!id) return;
       const c = commandsRef.current.find((x) => x.id === id);
-      if (c && !c.disabled) c.run();
+      if (!c) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!c.disabled) c.run();
     };
-    const h = (e: KeyboardEvent) => {
-      // Go to Line — ⌃G (Ctrl+G), no other modifiers.
-      if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "g") {
-        e.preventDefault();
-        setGotoLine(true);
-        return;
-      }
-      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
-      const key = e.key.toLowerCase();
-      if (key === "p") {
-        e.preventDefault();
-        setShowPalette((v) => !v);
-      } else if (key === "f") {
-        e.preventDefault();
-        setShowSearch(true);
-      } else if (key === "a") {
-        e.preventDefault();
-        runCmd("ai.review");
-      } else if (key === "b") {
-        e.preventDefault();
-        runCmd("cargo.check");
-      }
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    window.addEventListener("keydown", onKey, true);
+    return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("rustade:keymap", onKeymap); };
   }, []);
 
   if (!project) {

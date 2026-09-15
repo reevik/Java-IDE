@@ -125,6 +125,14 @@ export function writeFile(path: string, contents: string): Promise<void> {
   return invoke("write_file", { path, contents });
 }
 
+/** Read/write a text file at any path (not project-scoped) — for config import/export. */
+export function readTextFile(path: string): Promise<string> {
+  return invoke("read_text_file", { path });
+}
+export function writeTextFile(path: string, contents: string): Promise<void> {
+  return invoke("write_text_file", { path, contents });
+}
+
 export function createFile(dir: string, name: string): Promise<string> {
   return invoke("create_file", { dir, name });
 }

@@ -1034,6 +1034,20 @@ pub fn read_file(path: String, state: State<'_, AppState>) -> Result<String, Str
     fs_tree::read_file(&p).map_err(|e| format!("{e:#}"))
 }
 
+/// Read a text file at any path (for config import, e.g. a keymap file chosen
+/// via the OS open dialog). Unlike `read_file` this isn't project-scoped.
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("reading {path}: {e}"))
+}
+
+/// Write a text file at any path (for config export, e.g. a keymap file chosen
+/// via the OS save dialog). Unlike `write_file` this isn't project-scoped.
+#[tauri::command]
+pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("writing {path}: {e}"))
+}
+
 #[tauri::command]
 pub fn write_file(path: String, contents: String, state: State<'_, AppState>) -> Result<(), String> {
     let p = PathBuf::from(&path);

@@ -79,7 +79,7 @@ pub fn run() {
                 .build()?;
 
             let new_file =
-                MenuItem::with_id(handle, "file.new-file", "New File", true, Some("CmdOrCtrl+N"))?;
+                MenuItem::with_id(handle, "file.new-file", "New File", true, None::<&str>)?;
             let new_class =
                 MenuItem::with_id(handle, "file.new-class", "New Java Class…", true, None::<&str>)?;
             let new_dir = MenuItem::with_id(
@@ -87,11 +87,11 @@ pub fn run() {
                 "file.new-dir",
                 "New Folder",
                 true,
-                Some("CmdOrCtrl+Shift+N"),
+                None::<&str>,
             )?;
-            let save = MenuItem::with_id(handle, "file.save", "Save", true, Some("CmdOrCtrl+S"))?;
+            let save = MenuItem::with_id(handle, "file.save", "Save", true, None::<&str>)?;
             let close_tab =
-                MenuItem::with_id(handle, "file.close-tab", "Close Tab", true, Some("CmdOrCtrl+W"))?;
+                MenuItem::with_id(handle, "file.close-tab", "Close Tab", true, None::<&str>)?;
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .item(&new_file)
                 .item(&new_class)
@@ -111,14 +111,14 @@ pub fn run() {
                 .select_all()
                 .build()?;
 
-            let build = MenuItem::with_id(handle, "cargo.build", "Build", true, Some("CmdOrCtrl+B"))?;
-            let run_it = MenuItem::with_id(handle, "cargo.run", "Run", true, Some("CmdOrCtrl+R"))?;
-            let test = MenuItem::with_id(handle, "cargo.test", "Test", true, Some("CmdOrCtrl+U"))?;
+            let build = MenuItem::with_id(handle, "cargo.build", "Build", true, None::<&str>)?;
+            let run_it = MenuItem::with_id(handle, "cargo.run", "Run", true, None::<&str>)?;
+            let test = MenuItem::with_id(handle, "cargo.test", "Test", true, None::<&str>)?;
             let clippy =
-                MenuItem::with_id(handle, "cargo.clippy", "Check", true, Some("CmdOrCtrl+L"))?;
+                MenuItem::with_id(handle, "cargo.clippy", "Check", true, None::<&str>)?;
             // ⌘⇧F is Find in Files (VS Code); format takes ⇧⌥F (also VS Code).
-            let fmt = MenuItem::with_id(handle, "cargo.fmt", "Format Project", true, Some("Alt+Shift+F"))?;
-            let cancel = MenuItem::with_id(handle, "cargo.cancel", "Stop", true, Some("CmdOrCtrl+."))?;
+            let fmt = MenuItem::with_id(handle, "cargo.fmt", "Format Project", true, None::<&str>)?;
+            let cancel = MenuItem::with_id(handle, "cargo.cancel", "Stop", true, None::<&str>)?;
             let edit_configs =
                 MenuItem::with_id(handle, "run.edit", "Edit Run Configurations…", true, None::<&str>)?;
             let cargo_menu = SubmenuBuilder::new(handle, "Build")
@@ -135,9 +135,9 @@ pub fn run() {
 
             // Code menu: static analysis + formatting of the current file.
             let code_analysis =
-                MenuItem::with_id(handle, "cargo.check", "Code Analysis", true, Some("CmdOrCtrl+Shift+B"))?;
+                MenuItem::with_id(handle, "cargo.check", "Code Analysis", true, None::<&str>)?;
             let reformat =
-                MenuItem::with_id(handle, "code.reformat", "Reformat Code", true, Some("CmdOrCtrl+Alt+L"))?;
+                MenuItem::with_id(handle, "code.reformat", "Reformat Code", true, None::<&str>)?;
             // Refactor This / Go to Line: accelerators (⌃T / ⌃G) are handled in-editor;
             // the menu items are for discoverability.
             let organize_imports =
@@ -166,13 +166,13 @@ pub fn run() {
                 .build()?;
 
             // Debug menu. F5 starts or continues; the rest match VS Code/IntelliJ.
-            let dbg_start = MenuItem::with_id(handle, "debug.start", "Start / Continue", true, Some("F5"))?;
-            let dbg_over = MenuItem::with_id(handle, "debug.step-over", "Step Over", true, Some("F10"))?;
-            let dbg_into = MenuItem::with_id(handle, "debug.step-into", "Step Into", true, Some("F11"))?;
-            let dbg_out = MenuItem::with_id(handle, "debug.step-out", "Step Out", true, Some("Shift+F11"))?;
-            let dbg_stop = MenuItem::with_id(handle, "debug.stop", "Stop Debugging", true, Some("Shift+F5"))?;
+            let dbg_start = MenuItem::with_id(handle, "debug.start", "Start / Continue", true, None::<&str>)?;
+            let dbg_over = MenuItem::with_id(handle, "debug.step-over", "Step Over", true, None::<&str>)?;
+            let dbg_into = MenuItem::with_id(handle, "debug.step-into", "Step Into", true, None::<&str>)?;
+            let dbg_out = MenuItem::with_id(handle, "debug.step-out", "Step Out", true, None::<&str>)?;
+            let dbg_stop = MenuItem::with_id(handle, "debug.stop", "Stop Debugging", true, None::<&str>)?;
             let bp_toggle =
-                MenuItem::with_id(handle, "debug.toggle-breakpoint", "Toggle Breakpoint", true, Some("CmdOrCtrl+F8"))?;
+                MenuItem::with_id(handle, "debug.toggle-breakpoint", "Toggle Breakpoint", true, None::<&str>)?;
             let bp_view =
                 MenuItem::with_id(handle, "debug.view-breakpoints", "View Breakpoints", true, None::<&str>)?;
             let bp_toggle_all =
@@ -195,34 +195,34 @@ pub fn run() {
                 .build()?;
 
             let quickopen =
-                MenuItem::with_id(handle, "view.quickopen", "Go to File…", true, Some("CmdOrCtrl+P"))?;
+                MenuItem::with_id(handle, "view.quickopen", "Go to File…", true, None::<&str>)?;
             let search = MenuItem::with_id(
                 handle,
                 "view.search",
                 "Find in Files…",
                 true,
-                Some("CmdOrCtrl+Shift+F"),
+                None::<&str>,
             )?;
             let palette = MenuItem::with_id(
                 handle,
                 "view.palette",
                 "Command Palette…",
                 true,
-                Some("CmdOrCtrl+K"),
+                None::<&str>,
             )?;
             let toggle_tree = MenuItem::with_id(
                 handle,
                 "view.tree",
                 "Toggle Explorer",
                 true,
-                Some("CmdOrCtrl+Alt+1"),
+                None::<&str>,
             )?;
             let toggle_output = MenuItem::with_id(
                 handle,
                 "view.output",
                 "Toggle Output",
                 true,
-                Some("CmdOrCtrl+Alt+2"),
+                None::<&str>,
             )?;
             let show_git =
                 MenuItem::with_id(handle, "view.git", "Version Control", true, None::<&str>)?;
@@ -231,21 +231,21 @@ pub fn run() {
                 "view.ai",
                 "Toggle Intelligent Review",
                 true,
-                Some("CmdOrCtrl+Alt+3"),
+                None::<&str>,
             )?;
             let toggle_chat = MenuItem::with_id(
                 handle,
                 "view.chat",
                 "Toggle AI Assistant",
                 true,
-                Some("CmdOrCtrl+Alt+4"),
+                None::<&str>,
             )?;
             let toggle_skills = MenuItem::with_id(
                 handle,
                 "view.skills",
                 "Toggle Skills",
                 true,
-                Some("CmdOrCtrl+Alt+5"),
+                None::<&str>,
             )?;
             let split_right =
                 MenuItem::with_id(handle, "view.split-right", "Split Right", true, None::<&str>)?;
@@ -275,7 +275,7 @@ pub fn run() {
                 "project.open",
                 "Open Project…",
                 true,
-                Some("CmdOrCtrl+Shift+O"),
+                None::<&str>,
             )?;
             let project_settings =
                 MenuItem::with_id(handle, "project.settings", "Project Settings…", true, None::<&str>)?;
@@ -412,6 +412,8 @@ pub fn run() {
             commands::spring_mains,
             commands::read_file,
             commands::write_file,
+            commands::read_text_file,
+            commands::write_text_file,
             commands::create_file,
             commands::create_dir,
             commands::rename_path,
