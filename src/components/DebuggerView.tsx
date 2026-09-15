@@ -190,11 +190,13 @@ function Toolbar(d: DebugProps) {
           </option>
         ))}
       </select>
-      <IconBtn onClick={d.onStart} title={startTitle} disabled={!d.available || d.status === "building" || d.status === "running"} kind={paused ? "continue" : "start"} />
-      <IconBtn onClick={d.onStepOver} title="Step Over (F10)" disabled={!paused} kind="over" />
-      <IconBtn onClick={d.onStepInto} title="Step Into (F11)" disabled={!paused} kind="into" />
-      <IconBtn onClick={d.onStepOut} title="Step Out (⇧F11)" disabled={!paused} kind="out" />
-      <IconBtn onClick={d.onStop} title="Stop (⇧F5)" disabled={!active} kind="stop" />
+      <div className="ml-1 flex items-center overflow-hidden rounded-md border border-[color:var(--line)] bg-[var(--control-bg)]">
+        <IconBtn first onClick={d.onStart} title={startTitle} disabled={!d.available || d.status === "building" || d.status === "running"} kind={paused ? "continue" : "start"} />
+        <IconBtn onClick={d.onStepOver} title="Step Over (F10)" disabled={!paused} kind="over" />
+        <IconBtn onClick={d.onStepInto} title="Step Into (F11)" disabled={!paused} kind="into" />
+        <IconBtn onClick={d.onStepOut} title="Step Out (⇧F11)" disabled={!paused} kind="out" />
+        <IconBtn onClick={d.onStop} title="Stop (⇧F5)" disabled={!active} kind="stop" />
+      </div>
       <span className={`debug-badge debug-badge-${d.status} ml-2`}>{STATUS_LABEL[d.status]}</span>
     </div>
   );
@@ -205,27 +207,35 @@ function IconBtn({
   title,
   disabled,
   kind,
+  first,
 }: {
   onClick: () => void;
   title: string;
   disabled: boolean;
   kind: "start" | "continue" | "over" | "into" | "out" | "stop";
+  first?: boolean;
 }) {
+  const green = kind === "start" || kind === "continue";
+  const stop = kind === "stop";
+  const tone = green
+    ? "text-green-700 hover:bg-green-500/10"
+    : stop
+      ? "text-[#e5534b] hover:bg-red-500/10"
+      : "text-[var(--text-secondary)] hover:bg-[var(--hover)]";
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       title={title}
       aria-label={title}
-      className="btn-bezel flex h-[26px] w-[26px] items-center justify-center disabled:opacity-30"
+      className={`flex items-center px-2 py-1 disabled:opacity-30 ${first ? "" : "border-l border-[color:var(--line)]"} ${tone}`}
     >
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        {kind === "start" && <path d="M7 4l12 8-12 8z" fill={disabled ? "none" : "#2f9e44"} stroke={disabled ? "currentColor" : "#2f9e44"} />}
-        {kind === "continue" && <path d="M7 4l12 8-12 8z" fill="#2f9e44" stroke="#2f9e44" />}
+        {(kind === "start" || kind === "continue") && <path d="M7 4l12 8-12 8z" fill="currentColor" stroke="currentColor" />}
         {kind === "over" && <path d="M4 9a8 8 0 0 1 15 3M19 6v6h-6M12 20v.01" />}
         {kind === "into" && <path d="M12 4v9M8.5 9.5L12 13l3.5-3.5M9 20h6" />}
         {kind === "out" && <path d="M12 13V4M8.5 7.5L12 4l3.5 3.5M9 20h6" />}
-        {kind === "stop" && <rect x="6" y="6" width="12" height="12" rx="1.5" fill="#e5534b" stroke="#e5534b" />}
+        {kind === "stop" && <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="currentColor" />}
       </svg>
     </button>
   );
