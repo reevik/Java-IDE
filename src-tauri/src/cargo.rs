@@ -261,6 +261,43 @@ pub async fn run(
     execute(app, dir, &program, args, env).await
 }
 
+/// Run a Java application by building the project's classpath — compiling first
+/// when `target/classes` is missing or stale — and launching `java -cp … Main`
+/// directly with the IDE-selected JDK. Robust where `exec:java` / the Gradle
+/// application plugin aren't configured. Maven only; Gradle keeps `gradle run`.
+pub async fn run_java_app(
+    app: AppHandle,
+    root: &Path,
+    main_class: &str,
+    prog_args: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+) -> Result<i32> {
+    let Some((_, gradle)) = detect_tool(root) else {
+        return no_tool(&app);
+    };
+    if gradle {
+        // Gradle: keep the application-plugin `run` path.
+        let mut extra = vec!["--main".to_string(), main_class.to_string()];
+        if !prog_args.is_empty() {
+            extra.push("--".into());
+            extra.extend(prog_args);
+        }
+        return run(app, root, "run", extra, env).await;
+    }
+    // Maven: compile (if stale) + resolve target/classes + runtime deps, then run.
+    let (_name, cp) = classpath_for_main(app.clone(), root, main_class).await?;
+    let java = crate::toolchain::java_home()
+        .map(|h| format!("{h}/bin/java"))
+        .unwrap_or_else(|| "java".to_string());
+    let mut args = vec!["-cp".to_string(), cp.join(":"), main_class.to_string()];
+    args.extend(prog_args);
+    let _ = app.emit(
+        "cargo:event",
+        CargoEvent::Line { stream: "stdout".into(), text: format!("Running {main_class}") },
+    );
+    execute(app, root, &java, args, env).await
+}
+
 /// Run raw build-tool goals (Maven lifecycle phases from the Maven panel, or a
 /// custom goal line). Maven runs in batch mode; Gradle gets plain console output.
 pub async fn run_goals(

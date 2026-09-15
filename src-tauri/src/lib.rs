@@ -383,6 +383,7 @@ pub fn run() {
             commands::move_paths,
             commands::copy_paths,
             commands::cargo_run,
+            commands::run_java_main,
             commands::run_maven_goals,
             commands::cargo_cancel,
             commands::cargo_is_running,

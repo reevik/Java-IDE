@@ -178,6 +178,11 @@ export function runMavenGoals(dir: string, goals: string[], env: Record<string, 
   return invoke("run_maven_goals", { dir, goals, env });
 }
 
+/** Run a Java application: build the classpath (compile if stale) + `java -cp … Main`. */
+export function runJavaMain(root: string, mainClass: string, args: string[], env: Record<string, string> = {}): Promise<number> {
+  return invoke("run_java_main", { root, mainClass, args, env });
+}
+
 // --- Search ---
 
 export function searchInFiles(root: string, query: string, caseSensitive: boolean): Promise<SearchMatch[]> {

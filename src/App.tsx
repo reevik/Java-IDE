@@ -58,6 +58,7 @@ import {
   gitWorkingDiff,
   listProjects,
   listTests,
+  runJavaMain,
   springMains,
   openProjectWindow,
   setModel,
@@ -903,10 +904,41 @@ export default function App() {
     [project, saveNow],
   );
 
+  // Launch a Java application via the classpath route (build target/classes if
+  // stale, then `java -cp … Main`), streaming like a build.
+  const runJavaApp = useCallback(
+    async (mainClass: string, args: string[], env: Record<string, string>) => {
+      if (!project) return;
+      await Promise.all(filesRef.current.filter((f) => f.saveState !== "saved").map((f) => saveNow(f.path)));
+      setLines([]);
+      setDiagnostics([]);
+      setLastResult(null);
+      setCommand("run");
+      setRunning(true);
+      setOutputHidden(false);
+      try {
+        await runJavaMain(project.path, mainClass, args, env);
+      } catch (e) {
+        setLines((prev) => [...prev, { stream: "stderr", text: String(e) }]);
+        setRunning(false);
+      }
+    },
+    [project, saveNow],
+  );
+
   /** Run any run configuration — routing by type (goals vs run/test). */
   const runConfig = useCallback(
     (c: RunConfig) => {
       setOutputTab("output");
+      // Java Application: resolve target/classes + deps and launch java directly
+      // (robust vs. exec:java). Empty main class uses the project's default.
+      if (c.type === "application") {
+        const main = c.mainClass?.trim() || info?.bins?.[0];
+        if (main) {
+          void runJavaApp(main, c.args, c.env);
+          return;
+        }
+      }
       // Spring Boot launches through the build plugin: `mvn spring-boot:run` or
       // `gradle bootRun` (the backend picks the tool). Program args + the target
       // main class are passed the way each plugin expects.
@@ -930,7 +962,7 @@ export default function App() {
         void runCargo(command, extra, env);
       }
     },
-    [runCargo, runGoal, buildTool],
+    [runCargo, runGoal, runJavaApp, buildTool, info?.bins],
   );
 
   /** Run the currently-selected run configuration. */

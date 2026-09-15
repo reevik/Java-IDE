@@ -1961,6 +1961,24 @@ pub async fn cargo_run(
         .map_err(|e| e.to_string())
 }
 
+/// Run a Java application: build the classpath (compiling if `target/classes` is
+/// stale) and launch `java -cp … Main` with the selected JDK. Streams like a build.
+#[tauri::command]
+pub async fn run_java_main(
+    root: String,
+    main_class: String,
+    args: Vec<String>,
+    env: Option<std::collections::HashMap<String, String>>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<i32, String> {
+    let d = PathBuf::from(&root);
+    ensure_within_projects(&d, &state)?;
+    cargo::run_java_app(app, &d, &main_class, args, env.unwrap_or_default())
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Run raw Maven/Gradle goals (the Maven panel: a lifecycle phase, or a custom
 /// goal line). Streams to the same output channel as a normal build.
 #[tauri::command]
