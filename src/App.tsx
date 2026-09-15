@@ -907,6 +907,22 @@ export default function App() {
   const runConfig = useCallback(
     (c: RunConfig) => {
       setOutputTab("output");
+      // Spring Boot launches through the build plugin: `mvn spring-boot:run` or
+      // `gradle bootRun` (the backend picks the tool). Program args + the target
+      // main class are passed the way each plugin expects.
+      if (c.type === "spring") {
+        const progArgs = c.args.join(" ");
+        const goals: string[] =
+          buildTool === "gradle"
+            ? ["bootRun", ...(c.args.length ? [`--args=${progArgs}`] : [])]
+            : [
+                "spring-boot:run",
+                ...(c.mainClass?.trim() ? [`-Dspring-boot.run.mainClass=${c.mainClass.trim()}`] : []),
+                ...(c.args.length ? [`-Dspring-boot.run.arguments=${progArgs}`] : []),
+              ];
+        void runGoal(goals, c.env);
+        return;
+      }
       if (isGoalConfig(c)) {
         void runGoal(goalsFor(c), c.env);
       } else {
@@ -914,7 +930,7 @@ export default function App() {
         void runCargo(command, extra, env);
       }
     },
-    [runCargo, runGoal],
+    [runCargo, runGoal, buildTool],
   );
 
   /** Run the currently-selected run configuration. */

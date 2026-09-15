@@ -172,7 +172,7 @@ export default function RunConfigDialog({ configs, tests, mains, springMains, on
 
                 {sel.type === "spring" && (
                   <>
-                    <Field label="Main class" hint="The @SpringBootApplication class. Running it starts the embedded server.">
+                    <Field label="Main class" hint="The @SpringBootApplication class. Runs via mvn spring-boot:run / gradle bootRun; used to target the app and for Debug.">
                       <SuggestInput
                         value={sel.mainClass ?? ""}
                         onChange={(v) => update({ mainClass: v || undefined })}
