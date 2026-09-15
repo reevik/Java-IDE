@@ -211,6 +211,97 @@ class HtmlWidget extends WidgetType {
   ignoreEvent() { return false; }
 }
 
+// --- Diagrams: mermaid (rendered locally) + PlantUML (via a server) ----------
+
+const PLANTUML_SERVER = "https://www.plantuml.com/plantuml";
+const DIAGRAM_LANGS = new Set(["mermaid", "plantuml", "puml", "uml"]);
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+let mermaidPromise: Promise<any> | null = null;
+function loadMermaid(): Promise<any> {
+  if (!mermaidPromise) {
+    mermaidPromise = import("mermaid").then((m) => {
+      const mermaid = m.default;
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: document.documentElement.dataset.theme === "dark" ? "dark" : "default",
+      });
+      return mermaid;
+    });
+  }
+  return mermaidPromise;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/** PlantUML's server URL for a diagram, using hex (`~h`) encoding — no client
+ *  compression needed. Note: the diagram text is sent to PLANTUML_SERVER. */
+function plantumlUrl(code: string): string {
+  const bytes = new TextEncoder().encode(code);
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return `${PLANTUML_SERVER}/svg/~h${hex}`;
+}
+
+let diagramSeq = 0;
+
+/** A rendered diagram block replacing a ```mermaid / ```plantuml fence. */
+class DiagramWidget extends WidgetType {
+  constructor(readonly lang: string, readonly code: string) { super(); }
+  eq(o: DiagramWidget) { return o.lang === this.lang && o.code === this.code; }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-diagram md-preview";
+    const reveal = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("a")) return;
+      e.preventDefault();
+      const pos = view.posAtDOM(wrap);
+      view.dispatch({ selection: { anchor: pos } });
+      view.focus();
+    };
+    wrap.addEventListener("mousedown", reveal);
+
+    const fail = (msg: string) => {
+      wrap.innerHTML = "";
+      const pre = document.createElement("pre");
+      pre.className = "cm-diagram-error";
+      pre.textContent = `${msg}\n\n${this.code}`;
+      wrap.appendChild(pre);
+    };
+
+    if (this.lang === "mermaid") {
+      wrap.textContent = "Rendering diagram…";
+      const id = `mmd-${diagramSeq++}`;
+      loadMermaid()
+        .then((m) => m.render(id, this.code))
+        .then(({ svg }: { svg: string }) => { wrap.innerHTML = svg; wrap.addEventListener("mousedown", reveal); })
+        .catch((e: unknown) => fail(`Mermaid error: ${e instanceof Error ? e.message : String(e)}`));
+    } else {
+      const img = document.createElement("img");
+      img.className = "cm-diagram-img";
+      img.alt = "PlantUML diagram";
+      img.loading = "lazy";
+      img.onerror = () => fail("PlantUML: couldn't render (server unreachable?)");
+      img.src = plantumlUrl(this.code);
+      wrap.appendChild(img);
+    }
+    return wrap;
+  }
+  ignoreEvent() { return false; }
+}
+
+/** The info string (language) of a fenced code block, lowercased. */
+function fenceInfo(doc: EditorState["doc"], from: number): string {
+  return doc.lineAt(from).text.replace(/^[`~]+/, "").trim().toLowerCase();
+}
+/** The inner text of a fenced code block (between the fence lines). */
+function fenceCode(doc: EditorState["doc"], from: number, to: number): string {
+  const first = doc.lineAt(from);
+  const last = doc.lineAt(Math.max(from, to - 1));
+  if (last.number <= first.number + 1) return "";
+  return doc.sliceString(doc.line(first.number + 1).from, doc.line(last.number - 1).to);
+}
+
 /** Obsidian-style inline rendering: hide markdown markers, style content, and
  *  reveal the raw source wherever the selection is. */
 function buildDecorations(view: EditorView, basePath?: string): DecorationSet {
@@ -248,6 +339,11 @@ function buildDecorations(view: EditorView, basePath?: string): DecorationSet {
           addLines(node.from, node.to, "cm-quote");
         } else if (name === "FencedCode" || name === "CodeBlock") {
           const codeEditing = editing(node.from, node.to);
+          // A mermaid/plantuml fence renders as a diagram block (from the block
+          // decoration field); don't also style it as a code block.
+          if (name === "FencedCode" && !codeEditing && DIAGRAM_LANGS.has(fenceInfo(doc, node.from))) {
+            return false;
+          }
           addLines(node.from, node.to, codeEditing ? "cm-codeblock cm-codeblock-editing" : "cm-codeblock");
           if (name === "FencedCode" && !codeEditing) {
             const first = doc.lineAt(node.from);
@@ -328,6 +424,18 @@ function buildBlockDecos(state: EditorState, basePath?: string): DecorationSet {
       } else if (node.name === "HTMLBlock") {
         if (!editing(node.from, node.to)) {
           deco.push(Decoration.replace({ widget: new HtmlWidget(doc.sliceString(node.from, node.to), basePath), block: true }).range(node.from, node.to));
+        }
+      } else if (node.name === "FencedCode") {
+        // ```mermaid / ```plantuml → render as a diagram (reveal source on click).
+        if (!editing(node.from, node.to)) {
+          const lang = fenceInfo(doc, node.from);
+          if (DIAGRAM_LANGS.has(lang)) {
+            const code = fenceCode(doc, node.from, node.to).trim();
+            if (code) {
+              deco.push(Decoration.replace({ widget: new DiagramWidget(lang, code), block: true }).range(node.from, node.to));
+              return false;
+            }
+          }
         }
       } else if (node.name === "Paragraph") {
         // A paragraph of only images (a badge row) → lay them out inline as one

@@ -1314,6 +1314,30 @@ select.field option {
 .md-cm .md-img-row a { display: inline-flex; }
 .md-cm .md-img-row img { vertical-align: middle; }
 
+/* Rendered diagram blocks (mermaid / PlantUML). */
+.md-cm .cm-diagram {
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow-x: auto;
+  cursor: text;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.md-cm .cm-diagram svg { max-width: 100%; height: auto; }
+.md-cm .cm-diagram-img { max-width: 100%; height: auto; }
+.md-cm .cm-diagram-error {
+  margin: 0;
+  text-align: left;
+  white-space: pre-wrap;
+  color: var(--danger, #c22);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+
 /* Markdown preview (Markdown editor's rendered pane). */
 .md-preview {
   color: var(--text-primary);
