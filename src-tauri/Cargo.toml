@@ -1,6 +1,6 @@
 [package]
 name = "java-ade"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reevik Java ADE — a glossy Java IDE with an AI agent"
 authors = ["Erhan Bağdemir"]
 edition = "2021"
