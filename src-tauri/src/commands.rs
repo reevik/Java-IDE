@@ -1000,6 +1000,15 @@ pub async fn detect_source_roots_cmd(
         .map_err(|e| e.to_string())
 }
 
+/// Fully-qualified `@SpringBootApplication` main classes in the project — the
+/// pre-detected entry points for a Spring Boot run configuration.
+#[tauri::command]
+pub fn spring_mains(root: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let d = PathBuf::from(&root);
+    ensure_within_projects(&d, &state)?;
+    Ok(projects::find_spring_mains(&d))
+}
+
 // --- Files ------------------------------------------------------------------
 
 #[tauri::command]

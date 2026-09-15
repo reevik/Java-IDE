@@ -277,6 +277,35 @@ fn scan_mains(base: &Path, cur: &Path, out: &mut Vec<String>) {
     }
 }
 
+/// Fully-qualified classes annotated `@SpringBootApplication` (with a main
+/// method) — the Spring Boot entry points, for the Spring run configuration.
+pub fn find_spring_mains(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for root in java_source_roots(dir) {
+        scan_spring(&root, &mut out);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn scan_spring(cur: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(cur) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            scan_spring(&p, out);
+        } else if p.extension().and_then(|x| x.to_str()) == Some("java") {
+            let Ok(text) = std::fs::read_to_string(&p) else { continue };
+            if text.contains("@SpringBootApplication") && has_main_method(&text) {
+                if let Some(fqcn) = fqcn_of(&text, &p) {
+                    out.push(fqcn);
+                }
+            }
+        }
+    }
+}
+
 /// Heuristic detector for a `public static void main(String[] args)` entry point,
 /// tolerant of ordering (`static public`), whitespace, and `String...`.
 fn has_main_method(src: &str) -> bool {

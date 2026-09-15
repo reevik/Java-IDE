@@ -58,6 +58,7 @@ import {
   gitWorkingDiff,
   listProjects,
   listTests,
+  springMains,
   openProjectWindow,
   setModel,
   setPreferredConnector,
@@ -225,6 +226,12 @@ export default function App() {
   const { data: testNames } = useQuery({
     queryKey: ["tests", project?.path],
     queryFn: () => listTests(project!.path),
+    enabled: !!project && editingConfigs,
+    staleTime: 30_000,
+  });
+  const { data: springMainNames } = useQuery({
+    queryKey: ["spring-mains", project?.path],
+    queryFn: () => springMains(project!.path),
     enabled: !!project && editingConfigs,
     staleTime: 30_000,
   });
@@ -1414,11 +1421,12 @@ export default function App() {
       return;
     }
     if (!selectedConfig) return;
-    // Only Java Application configs launch under the debugger.
-    if (selectedConfig.type !== "application") {
+    // Java Application and Spring Boot configs launch under the debugger (both
+    // run a main class).
+    if (selectedConfig.type !== "application" && selectedConfig.type !== "spring") {
       setOutputHidden(false);
       setOutputTab("debugger");
-      setDebugConsole([`Debugging isn't supported for a ${selectedConfig.type} configuration — use a Java Application configuration.`]);
+      setDebugConsole([`Debugging isn't supported for a ${selectedConfig.type} configuration — use a Java Application or Spring Boot configuration.`]);
       return;
     }
     const target: { kind: "bin" | "test"; name: string | null } = {
@@ -2038,6 +2046,7 @@ export default function App() {
           configs={runConfigs}
           tests={testNames ?? []}
           mains={info?.bins ?? []}
+          springMains={springMainNames ?? []}
           onSave={(next) => { persistConfigs(next); setEditingConfigs(false); }}
           onClose={() => setEditingConfigs(false)}
         />

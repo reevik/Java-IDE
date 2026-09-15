@@ -12,6 +12,7 @@ import { GradleLogo, MavenLogo } from "./BuildView";
 
 const TYPES: { type: RunType; label: string }[] = [
   { type: "application", label: "Java Application" },
+  { type: "spring", label: "Spring Boot" },
   { type: "maven", label: "Maven" },
   { type: "gradle", label: "Gradle" },
   { type: "junit", label: "JUnit" },
@@ -22,13 +23,15 @@ interface Props {
   tests: string[];
   /** Discovered main classes, for the Application → Main class suggestions. */
   mains: string[];
+  /** Detected @SpringBootApplication main classes, for the Spring Boot type. */
+  springMains: string[];
   onSave: (configs: RunConfig[]) => void;
   onClose: () => void;
 }
 
 /** IntelliJ-style "Edit Run Configurations" modal: a list on the left, a form on
  *  the right for the selected config. */
-export default function RunConfigDialog({ configs, tests, mains, onSave, onClose }: Props) {
+export default function RunConfigDialog({ configs, tests, mains, springMains, onSave, onClose }: Props) {
   const [draft, setDraft] = useState<RunConfig[]>(() => configs.map((c) => ({ ...c })));
   const [selId, setSelId] = useState<string | null>(draft[0]?.id ?? null);
   const sel = draft.find((c) => c.id === selId) ?? null;
@@ -48,6 +51,11 @@ export default function RunConfigDialog({ configs, tests, mains, onSave, onClose
 
   const add = (type: RunType) => {
     const c = newConfig(type);
+    // Spring Boot: pre-fill with the detected @SpringBootApplication main class.
+    if (type === "spring" && springMains.length > 0) {
+      c.mainClass = springMains[0];
+      c.name = springMains[0].split(".").pop() || "Spring Boot";
+    }
     setDraft((prev) => [...prev, c]);
     setSelId(c.id);
     setAddOpen(false);
@@ -162,6 +170,36 @@ export default function RunConfigDialog({ configs, tests, mains, onSave, onClose
                   </>
                 )}
 
+                {sel.type === "spring" && (
+                  <>
+                    <Field label="Main class" hint="The @SpringBootApplication class. Running it starts the embedded server.">
+                      <SuggestInput
+                        value={sel.mainClass ?? ""}
+                        onChange={(v) => update({ mainClass: v || undefined })}
+                        suggestions={springMains}
+                        placeholder={springMains.length ? "com.example.Application — type or pick below" : "com.example.Application"}
+                        invalid={!sel.mainClass?.trim()}
+                      />
+                      {!sel.mainClass?.trim() && (
+                        <p className="mt-1.5 flex items-center gap-1 text-[11px] text-red-600">
+                          <ErrorIcon />
+                          {springMains.length === 0
+                            ? "No @SpringBootApplication class found in this project."
+                            : "Select a Spring Boot main class."}
+                        </p>
+                      )}
+                    </Field>
+                    <Field label="Program arguments" hint="Passed to the app (e.g. --server.port=8081). Quote args with spaces.">
+                      <input
+                        value={argsText}
+                        onChange={(e) => { setArgsText(e.target.value); update({ args: parseArgs(e.target.value) }); }}
+                        placeholder="--server.port=8081 --spring.profiles.active=dev"
+                        className="field w-full px-2 py-1.5 font-mono text-[12px]"
+                      />
+                    </Field>
+                  </>
+                )}
+
                 {(sel.type === "maven" || sel.type === "gradle") && (
                   <Field
                     label={sel.type === "maven" ? "Goals" : "Tasks"}
@@ -229,11 +267,13 @@ function SuggestInput({
   onChange,
   suggestions,
   placeholder,
+  invalid,
 }: {
   value: string;
   onChange: (v: string) => void;
   suggestions: string[];
   placeholder?: string;
+  invalid?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const q = value.trim().toLowerCase();
@@ -247,7 +287,7 @@ function SuggestInput({
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         placeholder={placeholder}
         spellCheck={false}
-        className="field w-full px-2 py-1.5 font-mono text-[12px]"
+        className={`field w-full px-2 py-1.5 font-mono text-[12px] ${invalid ? "ring-1 ring-red-500/60" : ""}`}
       />
       {open && matches.length > 0 && (
         <div className="project-menu absolute left-0 right-0 top-full z-[70] mt-1 max-h-44 overflow-auto rounded-lg py-1">
@@ -279,6 +319,13 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 export function KindIcon({ type }: { type: RunType }) {
   switch (type) {
+    case "spring":
+      // Spring leaf mark.
+      return (
+        <svg viewBox="0 0 24 24" width="14" height="14" className="shrink-0 text-[#6db33f]" fill="currentColor">
+          <path d="M20.2 3.8a10 10 0 0 1-1.9 13.4c-2.9 2.7-7.4 3.2-10.9 1.3.6.2 1.5.3 2.4.2 3.6-.3 6.7-2.4 8.4-5.5-1.3 1.1-2.9 1.8-4.7 2-1.8.2-3.4-.1-4.9-.8 3.4.1 5.9-1 7.6-3.2-2 1-4 1.3-6 1-3.5-.6-5.2-2.7-5.1-2.8.1-.2 5 1.7 9.2-.6 0 0-1.8-.3-3.6-1.3 3.7.3 6.9-1.3 7.8-3.9.1-.2.1-.4-.2-.4-2.2 1.2-4.4 1.6-6.6 1.2 2.4-.5 4.6-1.7 6.3-3.5.3-.3.5-.7.7-1.1 0-.1.1-.3.3-.5.3.9.5 1.9.5 2.9a.5.5 0 0 0 1 0c0-.6 0-1.2-.1-1.8z" />
+        </svg>
+      );
     case "maven":
       return <MavenLogo size={13} className="text-[#C71A36]" />;
     case "gradle":
@@ -309,6 +356,14 @@ function TrashIcon() {
   return (
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" />
+    </svg>
+  );
+}
+
+function ErrorIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" />
     </svg>
   );
 }

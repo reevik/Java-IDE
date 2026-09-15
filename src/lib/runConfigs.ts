@@ -1,7 +1,7 @@
 import type { CargoCommand } from "./types";
 
 /** The kind of thing a run configuration launches. */
-export type RunType = "application" | "maven" | "gradle" | "junit";
+export type RunType = "application" | "spring" | "maven" | "gradle" | "junit";
 
 /** An IntelliJ-style, typed run configuration for a project. */
 export interface RunConfig {
@@ -63,6 +63,8 @@ export function newId(): string {
 export function newConfig(type: RunType): RunConfig {
   const base = { id: newId(), type, args: [], env: {} as Record<string, string> };
   switch (type) {
+    case "spring":
+      return { ...base, name: "Spring Boot", mainClass: "" };
     case "maven":
       return { ...base, name: "Maven", goals: "clean install", profiles: "" };
     case "gradle":

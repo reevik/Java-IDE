@@ -291,6 +291,11 @@ export function listTests(root: string): Promise<string[]> {
   return invoke("list_tests", { root });
 }
 
+/** Fully-qualified @SpringBootApplication main classes (Spring Boot entry points). */
+export function springMains(root: string): Promise<string[]> {
+  return invoke("spring_mains", { root });
+}
+
 /** Stage the given repo-relative paths (`git add`). */
 export function gitStage(root: string, paths: string[]): Promise<void> {
   return invoke("git_stage", { root, paths });

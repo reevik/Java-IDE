@@ -373,6 +373,7 @@ pub fn run() {
             commands::project_info,
             commands::read_project_tree,
             commands::detect_source_roots_cmd,
+            commands::spring_mains,
             commands::read_file,
             commands::write_file,
             commands::create_file,
