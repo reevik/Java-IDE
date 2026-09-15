@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
+import Select from "./Select";
 import { agentStatusMeta, type Comment, type Task } from "../lib/taskBoards";
 
 interface Props {
@@ -91,9 +92,7 @@ export default function TaskDetailDialog({
           {assigning ? (
             <>
               <span className="text-[12px] text-[var(--text-secondary)]">Assign to agent — set status to</span>
-              <select value={assignCol} onChange={(e) => setAssignCol(e.target.value)} className="field px-1.5 py-1 text-[12px]">
-                {columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <Select value={assignCol} onChange={setAssignCol} className="field px-1.5 py-1 text-[12px]" options={columns.map((c) => ({ value: c.id, label: c.name }))} />
               <button onClick={() => { onAssign(assignCol); setAssigning(false); }} className="btn-accent px-2.5 py-1 text-[12px]">Assign & start</button>
               <button onClick={() => setAssigning(false)} className="btn-bezel px-2.5 py-1 text-[12px]">Cancel</button>
             </>
@@ -128,14 +127,13 @@ export default function TaskDetailDialog({
               </span>
             ))}
             {depCandidates.length > 0 && (
-              <select
+              <Select
                 value=""
-                onChange={(e) => { if (e.target.value) onAddDep(e.target.value); }}
+                onChange={(v) => { if (v) onAddDep(v); }}
+                placeholder="+ Add dependency…"
                 className="field px-1.5 py-1 text-[11.5px]"
-              >
-                <option value="">+ Add dependency…</option>
-                {depCandidates.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
-              </select>
+                options={depCandidates.map((c) => ({ value: c.id, label: c.title }))}
+              />
             )}
           </div>
 

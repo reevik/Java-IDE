@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import MarkdownEditor from "./MarkdownEditor";
+import Select from "./Select";
 import { generateTasks, type GeneratedTask } from "../lib/api";
 import { latestVersion, newSpec, type Spec, type SpecRef } from "../lib/taskBoards";
 
@@ -154,11 +155,13 @@ export default function SpecDialog({ specs, columns, onSpecsChange, onAddTasks, 
                 />
                 <label className="flex shrink-0 items-center gap-1 text-[11.5px] text-[var(--text-tertiary)]">
                   Version
-                  <select value={viewVer} onChange={(e) => selectVersion(Number(e.target.value))} className="field px-1.5 py-1 text-[12px]">
-                    {versions.map((v) => (
-                      <option key={v.version} value={v.version}>v{v.version}{v.version === latest!.version ? " (latest)" : ""}</option>
-                    ))}
-                  </select>
+                  <Select
+                    value={String(viewVer)}
+                    onChange={(v) => selectVersion(Number(v))}
+                    className="field px-1.5 py-1 text-[12px]"
+                    alignRight
+                    options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}${v.version === latest!.version ? " (latest)" : ""}` }))}
+                  />
                 </label>
                 <button onClick={deleteSpec} title="Delete spec" className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--hover)] hover:text-red-600"><TrashIcon /></button>
                 <button onClick={onClose} className="btn-bezel px-3 py-1.5 text-[12.5px]">Close</button>

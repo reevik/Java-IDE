@@ -11,6 +11,7 @@ import {
   type Variable,
 } from "../lib/api";
 import Resizer from "./Resizer";
+import Select from "./Select";
 
 function persistedWidth(key: string, fallback: number) {
   const v = Number(localStorage.getItem(key));
@@ -173,23 +174,15 @@ function Toolbar(d: DebugProps) {
       : "Start Debugging (F5)";
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[color:var(--line)] px-2">
-      <select
+      <Select
         value={value}
-        onChange={(e) => {
-          const v = e.target.value;
-          d.onTarget(v === "test" ? { kind: "test", name: null } : { kind: "bin", name: v.slice(4) });
-        }}
+        onChange={(v) => d.onTarget(v === "test" ? { kind: "test", name: null } : { kind: "bin", name: v.slice(4) })}
         disabled={active || !d.available}
         title="Debug target"
-        className="btn-bezel h-[26px] max-w-[150px] px-1.5 text-[11.5px] disabled:opacity-50"
-      >
-        {d.bins.length === 0 && <option value="bin:">No main class</option>}
-        {d.bins.map((b) => (
-          <option key={b} value={`bin:${b}`}>
-            {b}
-          </option>
-        ))}
-      </select>
+        placeholder="No main class"
+        className="btn-bezel h-[26px] max-w-[170px] px-1.5 text-[11.5px] disabled:opacity-50"
+        options={d.bins.length === 0 ? [{ value: "bin:", label: "No main class" }] : d.bins.map((b) => ({ value: `bin:${b}`, label: b }))}
+      />
       <div className="ml-1 flex items-center overflow-hidden rounded-md border border-[color:var(--line)] bg-[var(--control-bg)]">
         <IconBtn first onClick={d.onStart} title={startTitle} disabled={!d.available || d.status === "building" || d.status === "running"} kind={paused ? "continue" : "start"} />
         <IconBtn onClick={d.onStepOver} title="Step Over (F10)" disabled={!paused} kind="over" />

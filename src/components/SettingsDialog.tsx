@@ -26,6 +26,7 @@ import {
 import { loadSaveActions, saveSaveActions, type SaveActions } from "../lib/saveActions";
 import { applyAppearance, loadAppearance, loadFontFamily, loadFontSize, loadMarginColumn, loadShowMargin, loadWrapAtMargin, saveAppearance, saveFont, saveMargin, type Appearance } from "../lib/theme";
 import { editorThemeOptions, loadEditorTheme, saveEditorTheme } from "../lib/editorThemes";
+import Select from "./Select";
 
 /** IntelliJ-style settings navigation: top-level leaves and expandable groups
  *  whose children are leaves. Each leaf renders a panel on the right. */
@@ -308,33 +309,21 @@ function AppearanceTab() {
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-[var(--text-secondary)]">Light appearance</span>
-            <select
+            <Select
               value={lightScheme}
-              onChange={(e) => {
-                const id = e.target.value;
-                setLightScheme(id);
-                saveEditorTheme(false, id);
-                window.dispatchEvent(new Event("rustade:theme"));
-              }}
+              onChange={(id) => { setLightScheme(id); saveEditorTheme(false, id); window.dispatchEvent(new Event("rustade:theme")); }}
               className="field w-full px-2 py-1.5 text-[12px]"
-            >
-              {editorThemeOptions(false).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
+              options={editorThemeOptions(false).map((o) => ({ value: o.id, label: o.name }))}
+            />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-[var(--text-secondary)]">Dark appearance</span>
-            <select
+            <Select
               value={darkScheme}
-              onChange={(e) => {
-                const id = e.target.value;
-                setDarkScheme(id);
-                saveEditorTheme(true, id);
-                window.dispatchEvent(new Event("rustade:theme"));
-              }}
+              onChange={(id) => { setDarkScheme(id); saveEditorTheme(true, id); window.dispatchEvent(new Event("rustade:theme")); }}
               className="field w-full px-2 py-1.5 text-[12px]"
-            >
-              {editorThemeOptions(true).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
+              options={editorThemeOptions(true).map((o) => ({ value: o.id, label: o.name }))}
+            />
           </label>
         </div>
         <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">The editor uses the scheme matching the current appearance, so switching to Dark automatically applies your dark scheme. “Default” follows the built-in palette.</p>
@@ -344,13 +333,12 @@ function AppearanceTab() {
         <div className="flex items-end gap-3">
           <label className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="text-[11px] font-medium text-[var(--text-secondary)]">Typeface</span>
-            <select
+            <Select
               value={fontFamily}
-              onChange={(e) => { setFontFamily(e.target.value); saveFont(e.target.value, fontSize); }}
+              onChange={(v) => { setFontFamily(v); saveFont(v, fontSize); }}
               className="field w-full px-2 py-1.5 text-[12px]"
-            >
-              {FONTS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-            </select>
+              options={FONTS.map((f) => ({ value: f.value, label: f.label }))}
+            />
           </label>
           <label className="flex w-[110px] shrink-0 flex-col gap-1">
             <span className="text-[11px] font-medium text-[var(--text-secondary)]">Size ({fontSize}px)</span>
@@ -829,22 +817,16 @@ function AiModelPanel() {
   return (
     <div>
       <Section title="Model">
-        <select
+        <Select
           value={custom ? "__custom__" : model}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__custom__") { setCustom(true); return; }
-            setCustom(false);
-            applyModel(v);
-          }}
+          onChange={(v) => { if (v === "__custom__") { setCustom(true); return; } setCustom(false); applyModel(v); }}
           className="field w-full px-2 py-1.5 text-[12.5px]"
-        >
-          <option value="">Default{settings?.default_model ? ` (${friendly(settings.default_model)})` : ""}</option>
-          {MODELS.map((m) => (
-            <option key={m.id} value={m.id}>{m.label}</option>
-          ))}
-          <option value="__custom__">Custom…</option>
-        </select>
+          options={[
+            { value: "", label: `Default${settings?.default_model ? ` (${friendly(settings.default_model)})` : ""}` },
+            ...MODELS.map((m) => ({ value: m.id, label: m.label })),
+            { value: "__custom__", label: "Custom…" },
+          ]}
+        />
         {custom && (
           <input
             value={model}
