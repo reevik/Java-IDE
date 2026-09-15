@@ -276,11 +276,17 @@ class DiagramWidget extends WidgetType {
 
     let zoom = 1;
     let base = 0;
+    let userZoomed = false;
+    // Fit-to-width: shrink a diagram wider than the pane down to fit; never
+    // upscale a small one past its natural size.
+    const fitZoom = () => (base ? Math.min(1, Math.max(0.1, (scroll.clientWidth - 4) / base)) : 1);
     const apply = () => {
       const el = stage.querySelector("svg, img") as HTMLElement | null;
       if (el && base) el.style.width = `${Math.round(base * zoom)}px`;
       label.textContent = `${Math.round(zoom * 100)}%`;
     };
+    const fit = () => { zoom = fitZoom(); apply(); };
+    const setZoom = (z: number) => { userZoomed = true; zoom = Math.min(4, Math.max(0.1, +z.toFixed(2))); apply(); };
     const mk = (txt: string, title: string, fn: () => void) => {
       const b = document.createElement("button");
       b.className = "cm-diagram-btn";
@@ -290,14 +296,19 @@ class DiagramWidget extends WidgetType {
       b.onclick = (e) => { e.stopPropagation(); fn(); };
       return b;
     };
-    bar.appendChild(mk("−", "Zoom out", () => { zoom = Math.max(0.25, +(zoom - 0.25).toFixed(2)); apply(); }));
-    const label = mk("100%", "Reset zoom", () => { zoom = 1; apply(); });
+    bar.appendChild(mk("−", "Zoom out", () => setZoom(zoom - 0.25)));
+    const label = mk("100%", "Reset zoom (fit to width)", () => { userZoomed = false; fit(); });
     label.classList.add("cm-diagram-reset");
     bar.appendChild(label);
-    bar.appendChild(mk("+", "Zoom in", () => { zoom = Math.min(4, +(zoom + 0.25).toFixed(2)); apply(); }));
+    bar.appendChild(mk("+", "Zoom in", () => setZoom(zoom + 0.25)));
 
     wrap.appendChild(bar);
     wrap.appendChild(scroll);
+
+    // Re-fit when the pane resizes, unless the user set their own zoom.
+    const ro = new ResizeObserver(() => { if (!userZoomed && base) fit(); });
+    ro.observe(scroll);
+    (wrap as unknown as { _ro?: ResizeObserver })._ro = ro;
 
     const fail = (msg: string) => {
       bar.remove();
@@ -319,7 +330,7 @@ class DiagramWidget extends WidgetType {
             base = el.viewBox?.baseVal?.width || el.getBoundingClientRect().width || 640;
             el.removeAttribute("height");
             el.style.maxWidth = "none";
-            apply();
+            fit();
           }
         })
         .catch((e: unknown) => fail(`Mermaid error: ${e instanceof Error ? e.message : String(e)}`));
@@ -328,11 +339,14 @@ class DiagramWidget extends WidgetType {
       img.className = "cm-diagram-img";
       img.alt = "PlantUML diagram";
       img.loading = "lazy";
-      img.onload = () => { base = img.naturalWidth || 640; stage.textContent = ""; stage.appendChild(img); apply(); };
+      img.onload = () => { base = img.naturalWidth || 640; stage.textContent = ""; stage.appendChild(img); fit(); };
       img.onerror = () => fail("PlantUML: couldn't render (server unreachable?)");
       img.src = plantumlUrl(this.code);
     }
     return wrap;
+  }
+  destroy(dom: HTMLElement) {
+    (dom as unknown as { _ro?: ResizeObserver })._ro?.disconnect();
   }
   ignoreEvent() { return false; }
 }
