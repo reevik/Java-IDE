@@ -265,26 +265,49 @@ class DiagramWidget extends WidgetType {
     stage.textContent = "Rendering diagram…";
     scroll.appendChild(stage);
 
-    // Click on the diagram (not the toolbar) reveals the source for editing.
-    scroll.addEventListener("mousedown", (e) => {
-      if ((e.target as HTMLElement).closest("a")) return;
-      e.preventDefault();
-      const pos = view.posAtDOM(wrap);
-      view.dispatch({ selection: { anchor: pos } });
-      view.focus();
-    });
-
     let zoom = 1;
     let base = 0;
     let userZoomed = false;
     // Fit-to-width: shrink a diagram wider than the pane down to fit; never
     // upscale a small one past its natural size.
     const fitZoom = () => (base ? Math.min(1, Math.max(0.1, (scroll.clientWidth - 4) / base)) : 1);
+    const pannable = () => scroll.scrollWidth > scroll.clientWidth + 1 || scroll.scrollHeight > scroll.clientHeight + 1;
     const apply = () => {
       const el = stage.querySelector("svg, img") as HTMLElement | null;
       if (el && base) el.style.width = `${Math.round(base * zoom)}px`;
       label.textContent = `${Math.round(zoom * 100)}%`;
+      scroll.style.cursor = pannable() ? "grab" : "text";
     };
+
+    // Drag to pan when zoomed in; a plain click (no drag) reveals the source.
+    scroll.addEventListener("mousedown", (e) => {
+      if ((e.target as HTMLElement).closest("a")) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const sl = scroll.scrollLeft;
+      const st = scroll.scrollTop;
+      const canPan = pannable();
+      let moved = false;
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!moved && Math.hypot(dx, dy) > 4) { moved = true; scroll.classList.add("cm-diagram-panning"); }
+        if (moved && canPan) { scroll.scrollLeft = sl - dx; scroll.scrollTop = st - dy; }
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove, true);
+        window.removeEventListener("mouseup", onUp, true);
+        scroll.classList.remove("cm-diagram-panning");
+        if (!moved) {
+          const pos = view.posAtDOM(wrap);
+          view.dispatch({ selection: { anchor: pos } });
+          view.focus();
+        }
+      };
+      window.addEventListener("mousemove", onMove, true);
+      window.addEventListener("mouseup", onUp, true);
+    });
     const fit = () => { zoom = fitZoom(); apply(); };
     const setZoom = (z: number) => { userZoomed = true; zoom = Math.min(4, Math.max(0.1, +z.toFixed(2))); apply(); };
     const mk = (txt: string, title: string, fn: () => void) => {

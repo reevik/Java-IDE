@@ -1327,6 +1327,7 @@ select.field option {
   font-size: 12px;
 }
 .md-cm .cm-diagram-scroll { overflow: auto; text-align: center; }
+.md-cm .cm-diagram-scroll.cm-diagram-panning { cursor: grabbing !important; user-select: none; }
 .md-cm .cm-diagram-stage { display: inline-block; min-width: 100%; }
 .md-cm .cm-diagram svg,
 .md-cm .cm-diagram-img { height: auto; }
