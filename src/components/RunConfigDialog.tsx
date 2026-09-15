@@ -214,11 +214,12 @@ export default function RunConfigDialog({ configs, tests, mains, springMains, on
                     {!sel.port?.trim() && (
                       <p className="-mt-1 flex items-center gap-1 text-[11px] text-red-600"><ErrorIcon /> Set the JDWP port to attach to.</p>
                     )}
-                    <Field label="On the remote JVM" hint="Start the target JVM with this agent, then Debug this configuration to attach.">
+                    <Field label="On the remote JVM" hint="Start the target JVM with this agent, then Debug this configuration to attach. In a shell (zsh/bash), quote it — the * is otherwise glob-expanded.">
                       <div className="flex items-center gap-2">
                         <code className="field min-w-0 flex-1 overflow-x-auto whitespace-nowrap px-2 py-1.5 font-mono text-[11.5px] text-[var(--text-secondary)]">{jdwpArg(sel.port)}</code>
                         <button
-                          onClick={() => void navigator.clipboard.writeText(jdwpArg(sel.port)).catch(() => {})}
+                          onClick={() => void navigator.clipboard.writeText(`'${jdwpArg(sel.port)}'`).catch(() => {})}
+                          title="Copies the argument single-quoted so it's shell-safe to paste"
                           className="btn-bezel shrink-0 px-2.5 py-1.5 text-[12px]"
                         >
                           Copy
