@@ -21,6 +21,8 @@ import {
   appVersion,
   detectAiConnectors,
   detectedJdks,
+  detectedMavens,
+  setMavenPath,
   readTextFile,
   writeTextFile,
   setLlmApiKey,
@@ -77,7 +79,14 @@ const NAV: NavNode[] = [
       { id: "ai-model", label: "Model & API", render: () => <AiModelPanel />, keywords: "model api key anthropic sonnet opus haiku token" },
     ],
   },
-  { id: "tools", label: "Tools", render: () => <ToolsTab />, keywords: "tools toolchain maven gradle git paths executables" },
+  {
+    id: "tools",
+    label: "Tools",
+    children: [
+      { id: "tools-overview", label: "Overview", render: () => <ToolsTab />, keywords: "tools toolchain gradle git jdtls paths executables" },
+      { id: "maven", label: "Maven", render: () => <MavenPanel />, keywords: "maven mvn build homebrew brew sdkman m2_home maven_home detect select executable" },
+    ],
+  },
 ];
 
 const ALL_LEAVES: NavLeaf[] = NAV.flatMap((n) => (isGroup(n) ? n.children : [n]));
@@ -90,6 +99,13 @@ const TOOLCHAIN_KEY = "java.toolchainDir";
 
 export function loadToolchainDir(): string {
   return localStorage.getItem(TOOLCHAIN_KEY) ?? "";
+}
+
+const MAVEN_KEY = "java.mavenPath";
+
+/** The user's chosen `mvn` executable, or "" for auto-detect. */
+export function loadMavenPath(): string {
+  return localStorage.getItem(MAVEN_KEY) ?? "";
 }
 
 /** Curated model choices; "" means "use the backend default". */
@@ -532,6 +548,90 @@ function JdkPanel() {
         <Row label="java" value={info?.java ?? "not found"} mono muted={!info?.java} />
         <Row label="javac" value={info?.javac ?? "not found"} mono muted={!info?.javac} />
         <Row label="JAVA_HOME" value={info?.java_home ?? "—"} mono />
+      </Section>
+    </div>
+  );
+}
+
+// --- Maven ------------------------------------------------------------------
+
+function MavenPanel() {
+  const qc = useQueryClient();
+  const { data: mavens } = useQuery({ queryKey: ["detected-mavens"], queryFn: detectedMavens });
+  const [pathSel, setPathSel] = useState<string>(loadMavenPath());
+
+  const apply = async (value: string) => {
+    setPathSel(value);
+    if (value) localStorage.setItem(MAVEN_KEY, value);
+    else localStorage.removeItem(MAVEN_KEY);
+    await setMavenPath(value || null);
+    qc.invalidateQueries({ queryKey: ["tool-paths"] });
+  };
+
+  const browse = async () => {
+    const picked = await open({ multiple: false, title: "Select the mvn executable" });
+    if (typeof picked === "string") void apply(picked);
+  };
+
+  // The active Maven: an explicit override, else the first detected install.
+  const activePath = pathSel || mavens?.[0]?.path || "";
+
+  return (
+    <div>
+      <Section title="Detected Maven installations">
+        {!mavens ? (
+          <p className="text-[12px] text-[var(--text-tertiary)]">Detecting…</p>
+        ) : mavens.length === 0 ? (
+          <p className="text-[12px] text-[var(--text-tertiary)]">
+            No Maven found. Install it (e.g. <code className="font-mono">brew install maven</code>) or set the <code className="font-mono">mvn</code> path below. A project’s <code className="font-mono">./mvnw</code> wrapper is always used when present.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {mavens.map((m) => {
+              const active = m.path === activePath;
+              return (
+                <button
+                  key={m.path}
+                  onClick={() => void apply(m.path)}
+                  className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left ${
+                    active ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[color:var(--line)] hover:bg-[var(--hover)]"
+                  }`}
+                >
+                  <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? "border-[var(--accent)]" : "border-[color:var(--line)]"}`}>
+                    {active && <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[12.5px] font-medium text-[var(--text-primary)]">Maven {m.version}</span>
+                      <span className="shrink-0 text-[10.5px] text-[var(--text-tertiary)]">{m.source}</span>
+                      {active && <span className="shrink-0 text-[10px] font-medium text-[var(--accent-strong)]">DEFAULT</span>}
+                    </div>
+                    <div className="truncate font-mono text-[10.5px] text-[var(--text-tertiary)]" title={m.path}>{m.path}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+          Scanned on the filesystem (Homebrew, SDKMAN, <code className="font-mono">MAVEN_HOME</code>, common locations), so it works even when Maven isn’t on the app’s <code className="font-mono">PATH</code>. Builds use the selected Maven with the chosen JDK’s <code className="font-mono">JAVA_HOME</code>.
+        </p>
+      </Section>
+
+      <Section title="Custom Maven location">
+        <div className="flex items-center gap-2">
+          <input
+            value={pathSel}
+            onChange={(e) => void apply(e.target.value)}
+            placeholder="Auto-detect — e.g. /opt/homebrew/bin/mvn"
+            className="field min-w-0 flex-1 px-2 py-1.5 font-mono text-[12px]"
+          />
+          <button onClick={() => void browse()} title="Browse…" className="btn-bezel shrink-0 px-2.5 py-1.5 text-[12px]">…</button>
+          {pathSel && <button onClick={() => void apply("")} title="Reset to auto-detect" className="btn-bezel shrink-0 px-2.5 py-1.5 text-[12px]">Auto</button>}
+        </div>
+        <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+          Full path to an <code className="font-mono">mvn</code> executable, for installs not listed above. “Auto” picks the first detected one.
+        </p>
       </Section>
     </div>
   );

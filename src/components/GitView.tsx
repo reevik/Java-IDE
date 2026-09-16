@@ -3,11 +3,16 @@ import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   gitBranches,
+  gitRemoteStatus,
+  gitFetch,
+  gitPull,
+  gitPush,
   gitCheckout,
   gitCherryPick,
   gitCherryPickHead,
   gitCommit,
   gitCommitFiles,
+  generateCommitMessage,
   gitCreateBranch,
   gitReset,
   gitResolve,
@@ -48,14 +53,129 @@ export default function GitView({ root, onOpenDiff, onOpenWorkingDiff, onOpenFil
         <RailTab active={sub === "stage"} onClick={() => setSub("stage")} label="Stage" icon={<StageIcon />} />
         <RailTab active={sub === "branches"} onClick={() => setSub("branches")} label="Branches" icon={<BranchIcon />} />
       </nav>
-      <div className="min-w-0 flex-1">
-        {sub === "history" && <CommitHistory root={root} onOpenDiff={onOpenDiff} />}
-        {sub === "changes" && <CurrentChanges root={root} onOpenDiff={onOpenWorkingDiff} onOpenFile={onOpenFile} />}
-        {sub === "stage" && <StagePanel root={root} onOpenDiff={onOpenWorkingDiff} />}
-        {sub === "branches" && <BranchGraph root={root} />}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <RemoteBar root={root} />
+        <div className="min-h-0 flex-1">
+          {sub === "history" && <CommitHistory root={root} onOpenDiff={onOpenDiff} />}
+          {sub === "changes" && <CurrentChanges root={root} onOpenDiff={onOpenWorkingDiff} onOpenFile={onOpenFile} />}
+          {sub === "stage" && <StagePanel root={root} onOpenDiff={onOpenWorkingDiff} />}
+          {sub === "branches" && <BranchGraph root={root} />}
+        </div>
       </div>
     </div>
   );
+}
+
+/** Remote sync controls (Fetch / Pull --rebase / Push) with an ahead/behind
+ *  indicator for the current branch's upstream. */
+function RemoteBar({ root }: { root: string }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["git-remote-status", root],
+    queryFn: () => gitRemoteStatus(root),
+    refetchInterval: 5000,
+  });
+  const [busy, setBusy] = useState<null | "fetch" | "pull" | "push">(null);
+  const [msg, setMsg] = useState<{ text: string; error: boolean } | null>(null);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["git-remote-status", root] });
+    qc.invalidateQueries({ queryKey: ["git-status", root] });
+    qc.invalidateQueries({ queryKey: ["git-log", root] });
+  };
+
+  const run = async (kind: "fetch" | "pull" | "push", fn: () => Promise<string>, done: string) => {
+    setBusy(kind);
+    setMsg(null);
+    try {
+      const out = await fn();
+      setMsg({ text: firstLine(out) || done, error: false });
+      refresh();
+    } catch (e) {
+      setMsg({ text: firstLine(String(e)) || "Failed.", error: true });
+      refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!data) return <div className="h-9 shrink-0 border-b border-[color:var(--line)]" />;
+
+  const noRemote = !data.hasRemote;
+  const noUpstream = data.hasRemote && !data.upstream;
+
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[color:var(--line)] px-2.5">
+      <BranchGlyph />
+      <span className="min-w-0 truncate text-[12px] text-[var(--text-secondary)]" title={data.upstream ? `Tracking ${data.upstream}` : undefined}>
+        <span className="font-medium text-[var(--text-primary)]">{data.branch ?? "detached"}</span>
+        {data.upstream && <span className="text-[var(--text-tertiary)]"> → {data.upstream}</span>}
+      </span>
+      {(data.behind > 0 || data.ahead > 0) && (
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] tabular-nums text-[var(--text-tertiary)]">
+          {data.behind > 0 && <span title={`${data.behind} to pull`}>↓{data.behind}</span>}
+          {data.ahead > 0 && <span title={`${data.ahead} to push`}>↑{data.ahead}</span>}
+        </span>
+      )}
+
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {msg && (
+          <span className={`mr-1 max-w-[220px] truncate text-[11px] ${msg.error ? "text-red-600" : "text-[var(--text-tertiary)]"}`} title={msg.text}>
+            {msg.text}
+          </span>
+        )}
+        <RemoteBtn label="Fetch" busy={busy === "fetch"} disabled={!!busy || noRemote} onClick={() => void run("fetch", () => gitFetch(root), "Fetched.")} />
+        <RemoteBtn label={data.behind > 0 ? `Pull ${data.behind}` : "Pull"} busy={busy === "pull"} disabled={!!busy || noRemote || noUpstream} onClick={() => void run("pull", () => gitPull(root), "Up to date.")} />
+        <RemoteBtn label={data.ahead > 0 ? `Push ${data.ahead}` : "Push"} busy={busy === "push"} disabled={!!busy || noRemote} onClick={() => void run("push", () => gitPush(root), "Pushed.")} primary />
+      </div>
+    </div>
+  );
+}
+
+function RemoteBtn({ label, busy, disabled, onClick, primary }: { label: string; busy: boolean; disabled: boolean; onClick: () => void; primary?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-md px-2.5 py-1 text-[11.5px] font-medium disabled:opacity-40 ${
+        primary
+          ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] hover:brightness-105 disabled:hover:brightness-100"
+          : "border border-[color:var(--line)] text-[var(--text-secondary)] hover:bg-[var(--hover)]"
+      }`}
+    >
+      {busy ? "…" : label}
+    </button>
+  );
+}
+
+function BranchGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--text-tertiary)]">
+      <circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" />
+      <path d="M6 8.5v7M18 10.5c0 3-2 4.5-5 4.5H8" />
+    </svg>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" className="shrink-0">
+      <path d="M12 2.5l1.6 4.9a3 3 0 0 0 1.9 1.9L20.4 11l-4.9 1.6a3 3 0 0 0-1.9 1.9L12 19.4l-1.6-4.9a3 3 0 0 0-1.9-1.9L3.6 11l4.9-1.6a3 3 0 0 0 1.9-1.9z" />
+      <path d="M18.5 15.5l.5 1.6 1.6.5-1.6.5-.5 1.6-.5-1.6-1.6-.5 1.6-.5z" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" className="shrink-0 animate-spin">
+      <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
+  );
+}
+
+function firstLine(s: string): string {
+  return s.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
 }
 
 function RailTab({ active, onClick, label, icon }: { active: boolean; onClick: () => void; label: string; icon: React.ReactNode }) {
@@ -521,6 +641,7 @@ function StagePanel({ root, onOpenDiff }: { root: string; onOpenDiff: (relPath: 
   });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const staged = (data ?? []).filter((c) => c.staged !== " " && c.staged !== "?");
@@ -552,6 +673,20 @@ function StagePanel({ root, onOpenDiff }: { root: string; onOpenDiff: (relPath: 
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const generate = async () => {
+    if (genBusy || staged.length === 0) return;
+    setGenBusy(true);
+    setError(null);
+    try {
+      const msg = await generateCommitMessage(root);
+      if (msg.trim()) setMessage(msg.trim());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setGenBusy(false);
     }
   };
 
@@ -603,16 +738,27 @@ function StagePanel({ root, onOpenDiff }: { root: string; onOpenDiff: (relPath: 
         className="shrink-0 border-t border-[color:var(--line)] p-2"
         onSubmit={(e) => { e.preventDefault(); void commit(); }}
       >
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void commit(); }
-          }}
-          placeholder="Commit message… (⌘⏎ to commit)"
-          rows={2}
-          className="field block max-h-32 min-h-[42px] w-full resize-none px-2 py-1.5 text-[12px] leading-relaxed"
-        />
+        <div className="relative">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void commit(); }
+            }}
+            placeholder="Commit message… (⌘⏎ to commit)"
+            rows={2}
+            className="field block max-h-32 min-h-[42px] w-full resize-none px-2 py-1.5 pr-9 text-[12px] leading-relaxed"
+          />
+          <button
+            type="button"
+            onClick={() => void generate()}
+            disabled={genBusy || staged.length === 0}
+            title={staged.length === 0 ? "Stage changes to generate a message" : "Generate commit message from the staged diff (AI)"}
+            className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md text-[var(--accent-strong)] hover:bg-[var(--accent-soft)] disabled:opacity-35 disabled:hover:bg-transparent"
+          >
+            {genBusy ? <Spinner /> : <SparkIcon />}
+          </button>
+        </div>
         <div className="mt-1.5 flex items-center justify-end">
           <button
             type="submit"

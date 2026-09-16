@@ -110,6 +110,10 @@ export function projectInfo(path: string): Promise<ProjectInfo> {
 export function readProjectTree(path: string): Promise<TreeNode[]> {
   return invoke("read_project_tree", { path });
 }
+/** Watch `path` for external file changes; the backend emits `fs:changed`. */
+export function watchProject(path: string): Promise<void> {
+  return invoke("watch_project", { path });
+}
 
 /** Auto-detected source/resource roots (Maven `<build>` config, else conventions):
  *  project-relative directory path → role. */
@@ -203,6 +207,30 @@ export function gitBranch(root: string): Promise<string | null> {
 }
 export function gitBranches(root: string): Promise<string[]> {
   return invoke("git_branches", { root });
+}
+
+export interface RemoteStatus {
+  hasRemote: boolean;
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+}
+/** The current branch's ahead/behind counts vs its upstream (local refs). */
+export function gitRemoteStatus(root: string): Promise<RemoteStatus> {
+  return invoke("git_remote_status", { root });
+}
+/** Fetch from the default remote (prunes deleted branches). */
+export function gitFetch(root: string): Promise<string> {
+  return invoke("git_fetch", { root });
+}
+/** Pull with rebase (fetch + replay local commits on the upstream). */
+export function gitPull(root: string): Promise<string> {
+  return invoke("git_pull", { root });
+}
+/** Push the current branch to its upstream (sets it on first push). */
+export function gitPush(root: string): Promise<string> {
+  return invoke("git_push", { root });
 }
 export function gitCheckout(root: string, rev: string): Promise<string> {
   return invoke("git_checkout", { root, rev });
@@ -338,6 +366,10 @@ export function gitResolve(root: string, path: string, side: "ours" | "theirs"):
 export function gitCommit(root: string, message: string): Promise<string> {
   return invoke("git_commit", { root, message });
 }
+/** Ask the AI to write a commit message from the staged diff. */
+export function generateCommitMessage(root: string): Promise<string> {
+  return invoke("generate_commit_message", { root });
+}
 
 // --- AI ---
 
@@ -442,6 +474,27 @@ export interface JdkInfo {
 /** JDKs installed on the machine (macOS `/usr/libexec/java_home`). */
 export function detectedJdks(): Promise<JdkInfo[]> {
   return invoke("detected_jdks");
+}
+
+export interface MavenInstall {
+  /** The `mvn` executable. */
+  path: string;
+  /** e.g. "3.9.9", or "unknown". */
+  version: string;
+  /** Maven home (parent of `bin`). */
+  home: string;
+  /** "Homebrew" | "SDKMAN" | "MAVEN_HOME" | "System". */
+  source: string;
+}
+
+/** Maven installations detected on the machine (Homebrew, SDKMAN, MAVEN_HOME, …). */
+export function detectedMavens(): Promise<MavenInstall[]> {
+  return invoke("detected_mavens");
+}
+
+/** Set the `mvn` executable the IDE uses (null → auto-detect). */
+export function setMavenPath(path: string | null): Promise<void> {
+  return invoke("set_maven_path", { path });
 }
 
 /** Review a Rust file; partial output streams via `ai:review-progress`. */

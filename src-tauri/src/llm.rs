@@ -479,6 +479,26 @@ pub async fn tasks_via_api(api_key: &str, description: &str, columns: &[String])
     api_text(api_key, TASKS_PROMPT, &tasks_user(description, columns)).await
 }
 
+// --- Commit message from a staged diff ---------------------------------------
+
+const COMMIT_PROMPT: &str = "You write the git commit message for a staged diff. Respond with ONLY the commit message — no preamble, no explanation, no surrounding quotes or code fences. Follow Conventional Commits: a single subject line in the imperative mood, under ~72 characters, optionally prefixed with a type (feat, fix, refactor, docs, test, chore, perf, build, style). If the change is non-trivial, add a blank line then a short body of `- ` bullet points describing what changed and why. Summarize the intent of the change; do not restate the diff line by line or mention hunk headers.";
+
+fn commit_user(files: &str, diff: &str) -> String {
+    format!("Changed files (name-status):\n{files}\n\nStaged diff:\n{}", clip(diff))
+}
+
+pub async fn commit_message_via_cli<F>(cli: &Path, files: &str, diff: &str, on_progress: F) -> Result<String>
+where
+    F: FnMut(&str),
+{
+    let prompt = format!("{COMMIT_PROMPT}\n\n---\n\n{}", commit_user(files, diff));
+    cli_streamed(cli, &prompt, std::env::temp_dir().as_path(), None, &[], None, on_progress, |_| {}).await
+}
+
+pub async fn commit_message_via_api(api_key: &str, files: &str, diff: &str) -> Result<String> {
+    api_text(api_key, COMMIT_PROMPT, &commit_user(files, diff)).await
+}
+
 // --- Vibe Coder chat --------------------------------------------------------
 
 const VIBE_PROMPT: &str = "You are the AI Assistant, a friendly, pragmatic Java pair-programmer living inside an IDE. Help the developer write, understand, debug, and refactor Java, grounded in the file they have open and the surrounding project.\n\nSTAY STRICTLY ON TOPIC. You only answer questions about: this project and its code, the currently open file, the Java language and its ecosystem/tooling (Maven, Gradle, the JDK/standard library, JUnit, Spring, streams, generics, etc.), computer science, and software development/engineering. If asked about anything unrelated — politics, sports, celebrities, news, general trivia, personal or life advice, and so on — do NOT answer it; briefly and politely decline and offer to help with the code instead.\n\nKeep replies focused and concrete; use short Markdown with fenced ```java code blocks. Prefer idiomatic modern Java.\n\nWhenever you point at a place in the code, cite it as an inline-code path relative to the project root, with a line number when you know it — e.g. `src/main/java/com/example/App.java` or `src/main/java/com/example/App.java:128`. The IDE turns these into clickable links that open the file at that line, so prefer `path:line` for anything specific.";

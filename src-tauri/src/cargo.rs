@@ -65,7 +65,7 @@ fn detect_tool(dir: &Path) -> Option<(String, bool)> {
     }
     if dir.join("pom.xml").exists() {
         let w = dir.join("mvnw");
-        return Some((if w.exists() { w.to_string_lossy().into_owned() } else { "mvn".into() }, false));
+        return Some((if w.exists() { w.to_string_lossy().into_owned() } else { crate::maven::program() }, false));
     }
     None
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Breakpoint, Diagnostic } from "../lib/types";
 import { countBreakpoints, type BreakpointMap } from "../lib/breakpoints";
 import DebuggerView, { type DebugProps } from "./DebuggerView";
@@ -205,43 +205,15 @@ export default function OutputPanel({
           />
         </div>
       ) : tab === "problems" ? (
-        <div className="min-h-0 flex-1 overflow-auto">
-          {diagnostics.length === 0 ? (
+        diagnostics.length === 0 ? (
+          <div className="min-h-0 flex-1 overflow-auto">
             <p className="px-3 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
               {running ? "Compiling…" : "No problems."}
             </p>
-          ) : (
-            diagnostics.map((d, i) => (
-              <button
-                key={i}
-                onClick={() => d.file && d.line && onJump(d.file, d.line, d.column ?? 1)}
-                disabled={!d.file || !d.line}
-                title={d.rendered ?? undefined}
-                className={`flex w-full items-start gap-2 border-b border-[color:var(--line)] px-3 py-1.5 text-left text-[12px] ${
-                  d.file && d.line ? "hover:bg-[var(--hover)]" : "cursor-default opacity-80"
-                }`}
-              >
-                <span
-                  className={`mt-[3px] shrink-0 text-[9px] ${
-                    d.level === "error" ? "text-red-500" : "text-yellow-600"
-                  }`}
-                >
-                  ●
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[var(--text-primary)]">{d.message}</span>
-                  {d.file && (
-                    <span className="block truncate text-[11px] text-[var(--text-tertiary)]">
-                      {shortPath(d.file)}
-                      {d.line ? `:${d.line}${d.column ? `:${d.column}` : ""}` : ""}
-                      {d.code ? ` · ${d.code}` : ""}
-                    </span>
-                  )}
-                </span>
-              </button>
-            ))
-          )}
-        </div>
+          </div>
+        ) : (
+          <ProblemsList diagnostics={diagnostics} onJump={onJump} />
+        )
       ) : (
         <div ref={outRef} className="min-h-0 flex-1 overflow-auto px-3 py-2">
           {lines.length === 0 ? (
@@ -328,6 +300,74 @@ function Badge({ tone, children }: { tone: "error" | "warn"; children: React.Rea
     >
       {children}
     </span>
+  );
+}
+
+/** Fixed row height for the virtualized Problems list (must match the row markup:
+ *  6px×2 padding + a 16px message line + a 14px file line + 1px border ≈ 43). */
+const PROBLEM_ROW_H = 44;
+/** Extra rows rendered above/below the viewport to avoid blank edges while scrolling. */
+const PROBLEM_OVERSCAN = 8;
+
+/** A windowed list for the Problems tab: only the rows in view are mounted, so it
+ *  stays instant with thousands of diagnostics (rows are a fixed height, with the
+ *  full message in the hover tooltip). */
+function ProblemsList({ diagnostics, onJump }: { diagnostics: Diagnostic[]; onJump: (file: string, line: number, column: number) => void }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH] = useState(0);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setViewH(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const total = diagnostics.length;
+  const start = Math.max(0, Math.floor(scrollTop / PROBLEM_ROW_H) - PROBLEM_OVERSCAN);
+  const visibleCount = Math.ceil((viewH || 300) / PROBLEM_ROW_H) + PROBLEM_OVERSCAN * 2;
+  const end = Math.min(total, start + visibleCount);
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      className="min-h-0 flex-1 overflow-auto"
+    >
+      <div style={{ height: total * PROBLEM_ROW_H, position: "relative" }}>
+        {diagnostics.slice(start, end).map((d, i) => {
+          const idx = start + i;
+          return (
+            <button
+              key={idx}
+              onClick={() => d.file && d.line && onJump(d.file, d.line, d.column ?? 1)}
+              disabled={!d.file || !d.line}
+              title={d.rendered ?? undefined}
+              style={{ position: "absolute", top: idx * PROBLEM_ROW_H, height: PROBLEM_ROW_H, left: 0, right: 0 }}
+              className={`flex w-full items-start gap-2 overflow-hidden border-b border-[color:var(--line)] px-3 py-[6px] text-left text-[12px] ${
+                d.file && d.line ? "hover:bg-[var(--hover)]" : "cursor-default opacity-80"
+              }`}
+            >
+              <span className={`mt-[3px] shrink-0 text-[9px] ${d.level === "error" ? "text-red-500" : "text-yellow-600"}`}>●</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate leading-[16px] text-[var(--text-primary)]">{d.message}</span>
+                {d.file && (
+                  <span className="block truncate text-[11px] leading-[14px] text-[var(--text-tertiary)]">
+                    {shortPath(d.file)}
+                    {d.line ? `:${d.line}${d.column ? `:${d.column}` : ""}` : ""}
+                    {d.code ? ` · ${d.code}` : ""}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

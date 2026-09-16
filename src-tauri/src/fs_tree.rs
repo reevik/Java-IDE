@@ -15,7 +15,7 @@ pub struct TreeNode {
 }
 
 /// Directories that would swamp the tree and are never hand-edited.
-const SKIP_DIRS: &[&str] = &["target", "node_modules", ".git", ".idea", ".vscode", "dist"];
+pub const SKIP_DIRS: &[&str] = &["target", "node_modules", ".git", ".idea", ".vscode", "dist"];
 
 /// Files worth opening in the editor.
 fn is_source(path: &Path) -> bool {

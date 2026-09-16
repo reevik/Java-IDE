@@ -25,3 +25,4 @@ reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features 
 window-vibrancy = "0.7.1"
 toml = "0.9"
 similar = "2"
+notify = "6"

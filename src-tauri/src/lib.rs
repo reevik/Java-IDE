@@ -5,6 +5,7 @@ mod dap;
 mod fs_tree;
 mod llm;
 mod lsp;
+mod maven;
 mod projects;
 mod search;
 mod spring;
@@ -329,6 +330,7 @@ pub fn run() {
         .manage(commands::LspState::default())
         .manage(commands::DapState::default())
         .manage(commands::AgentState::default())
+        .manage(commands::WatcherState::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -398,6 +400,8 @@ pub fn run() {
             commands::set_toolchain_dir,
             commands::toolchain_info,
             commands::detected_jdks,
+            commands::detected_mavens,
+            commands::set_maven_path,
             commands::project_modules,
             commands::dependency_tree,
             commands::create_module,
@@ -409,6 +413,7 @@ pub fn run() {
             commands::close_splashscreen,
             commands::project_info,
             commands::read_project_tree,
+            commands::watch_project,
             commands::detect_source_roots_cmd,
             commands::spring_mains,
             commands::spring_overview,
@@ -454,6 +459,11 @@ pub fn run() {
             commands::search_in_files,
             commands::git_branch,
             commands::git_branches,
+            commands::git_remote_status,
+            commands::git_fetch,
+            commands::git_pull,
+            commands::git_push,
+            commands::generate_commit_message,
             commands::git_checkout,
             commands::git_create_branch,
             commands::git_cherry_pick,

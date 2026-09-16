@@ -704,7 +704,7 @@ fn detect_build_tool(dir: &Path) -> Option<(String, bool)> {
     }
     if dir.join("pom.xml").exists() {
         let w = dir.join("mvnw");
-        return Some((if w.exists() { w.to_string_lossy().into_owned() } else { "mvn".into() }, false));
+        return Some((if w.exists() { w.to_string_lossy().into_owned() } else { crate::maven::program() }, false));
     }
     None
 }
@@ -1514,6 +1514,154 @@ fn git_out(r: &Path, args: &[&str]) -> Result<String, String> {
         };
         Err(msg.trim().to_string())
     }
+}
+
+/// Run a git command returning combined stdout+stderr (git writes push/pull
+/// progress and summaries to stderr even on success). Ok on success, Err on
+/// failure — both carrying the combined output for the panel to display.
+fn git_run(r: &Path, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(r)
+        .args(args)
+        .output()
+        .map_err(|e| format!("running git: {e}"))?;
+    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if !err.trim().is_empty() {
+        if !combined.trim().is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(&err);
+    }
+    let combined = combined.trim().to_string();
+    if out.status.success() {
+        Ok(combined)
+    } else {
+        Err(if combined.is_empty() { "git command failed".into() } else { combined })
+    }
+}
+
+/// The current branch's tracking status against its upstream, for the Git panel's
+/// pull/push controls.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteStatus {
+    /// The repo has at least one configured remote.
+    pub has_remote: bool,
+    /// Current branch (None on a detached HEAD).
+    pub branch: Option<String>,
+    /// Upstream ref, e.g. "origin/main" (None when the branch has no upstream).
+    pub upstream: Option<String>,
+    /// Commits on HEAD not yet on the upstream (how many to push).
+    pub ahead: u32,
+    /// Commits on the upstream not yet on HEAD (how many to pull).
+    pub behind: u32,
+}
+
+/// Report the current branch's ahead/behind counts vs its upstream. Reads local
+/// refs only (call `git_fetch` first for fresh counts).
+#[tauri::command]
+pub fn git_remote_status(root: String, state: State<'_, AppState>) -> Result<RemoteStatus, String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    let has_remote = git_out(&r, &["remote"]).map(|s| !s.trim().is_empty()).unwrap_or(false);
+    let branch = git_out(&r, &["rev-parse", "--abbrev-ref", "HEAD"]).ok().filter(|b| b != "HEAD");
+    let upstream = git_out(&r, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).ok();
+    let (ahead, behind) = if upstream.is_some() {
+        match git_out(&r, &["rev-list", "--left-right", "--count", "@{u}...HEAD"]) {
+            Ok(s) => {
+                let mut it = s.split_whitespace();
+                let behind = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                let ahead = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                (ahead, behind)
+            }
+            Err(_) => (0, 0),
+        }
+    } else {
+        (0, 0)
+    };
+    Ok(RemoteStatus { has_remote, branch, upstream, ahead, behind })
+}
+
+/// Fetch from the default remote (pruning deleted remote branches). Updates the
+/// remote-tracking refs; does not touch the working tree.
+#[tauri::command]
+pub fn git_fetch(root: String, state: State<'_, AppState>) -> Result<String, String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    git_run(&r, &["fetch", "--prune"])
+}
+
+/// Pull with rebase: fetch, then replay local commits on top of the upstream.
+/// Conflicts surface in the Changes panel's conflict UI.
+#[tauri::command]
+pub fn git_pull(root: String, state: State<'_, AppState>) -> Result<String, String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    git_run(&r, &["pull", "--rebase"])
+}
+
+/// Push the current branch to its upstream, setting the upstream automatically on
+/// a branch's first push.
+#[tauri::command]
+pub fn git_push(root: String, state: State<'_, AppState>) -> Result<String, String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    let has_upstream = git_out(&r, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).is_ok();
+    if has_upstream {
+        git_run(&r, &["push"])
+    } else {
+        let branch = git_out(&r, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+        if branch == "HEAD" {
+            return Err("Detached HEAD — check out a branch before pushing.".into());
+        }
+        git_run(&r, &["push", "--set-upstream", "origin", &branch])
+    }
+}
+
+/// Strip anything the model wrapped around the message (code fences, surrounding
+/// quotes) and trim trailing whitespace.
+fn clean_commit_message(s: &str) -> String {
+    let mut t = s.trim();
+    if let Some(inner) = t.strip_prefix("```") {
+        // Drop the opening fence's language tag line and the closing fence.
+        let inner = inner.splitn(2, '\n').nth(1).unwrap_or(inner);
+        t = inner.trim_end().strip_suffix("```").unwrap_or(inner).trim();
+    }
+    if t.len() >= 2 && ((t.starts_with('"') && t.ends_with('"')) || (t.starts_with('\'') && t.ends_with('\''))) {
+        t = t[1..t.len() - 1].trim();
+    }
+    t.to_string()
+}
+
+/// Generate a commit message from the staged diff via the AI. Streams partial
+/// text via `ai:text-progress`; returns the final message.
+#[tauri::command]
+pub async fn generate_commit_message(
+    root: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    let diff = git_out(&r, &["diff", "--cached"]).unwrap_or_default();
+    if diff.trim().is_empty() {
+        return Err("No staged changes to describe — stage files first.".into());
+    }
+    let files = git_out(&r, &["diff", "--cached", "--name-status"]).unwrap_or_default();
+
+    let emit = |acc: &str| {
+        let _ = app.emit("ai:text-progress", acc.to_string());
+    };
+    let text = if let Some(cli) = llm::cli_if_allowed() {
+        llm::commit_message_via_cli(&cli, &files, &diff, emit).await.map_err(|e| e.to_string())?
+    } else if let Some(key) = llm::get_api_key() {
+        llm::commit_message_via_api(&key, &files, &diff).await.map_err(|e| e.to_string())?
+    } else {
+        return Err("No AI backend. Install the Claude CLI or add an API key in Settings.".into());
+    };
+    Ok(clean_commit_message(&text))
 }
 
 /// Local branch names (short form).
@@ -2439,6 +2587,20 @@ fn plist_string(dict: &str, key: &str) -> Option<String> {
     Some(after[s..e].trim().to_string())
 }
 
+/// Enumerate the Maven installations on this machine (Homebrew, SDKMAN,
+/// MAVEN_HOME, common system locations), for the Settings → Tools → Maven picker.
+#[tauri::command]
+pub fn detected_mavens() -> Vec<crate::maven::MavenInstall> {
+    crate::maven::detect()
+}
+
+/// Set the `mvn` executable the IDE uses (None → auto-detect). In-memory; the
+/// frontend persists the choice and re-applies it on startup.
+#[tauri::command]
+pub fn set_maven_path(path: Option<String>) {
+    crate::maven::set_path(path);
+}
+
 /// A discovered (or missing) external tool the IDE relies on.
 #[derive(serde::Serialize)]
 pub struct ToolInfo {
@@ -2476,7 +2638,7 @@ pub fn tool_paths() -> Vec<ToolInfo> {
     vec![
         tool("java", which("java"), "Java runtime — install a JDK (e.g. `brew install openjdk@17`)."),
         tool("javac", which("javac"), "Java compiler — part of the JDK."),
-        tool("mvn", which("mvn"), "Maven build tool — `brew install maven` (or use the wrapper)."),
+        tool("mvn", crate::maven::found().or_else(|| which("mvn")), "Maven build tool — `brew install maven` (or use the wrapper). Auto-detected; override in Tools → Maven."),
         tool("gradle", which("gradle"), "Gradle build tool — `brew install gradle` (or use the wrapper)."),
         tool("jdtls", crate::lsp::find_jdtls(&std::env::temp_dir()).map(|l| l.program), "Java language server — `brew install jdtls`."),
         tool("google-java-format", find_google_java_format(), "Code formatter — `brew install google-java-format`."),
@@ -2985,6 +3147,77 @@ pub struct LspState(pub tokio::sync::Mutex<Option<crate::lsp::LspClient>>);
 /// Control handle for the running AI agent CLI (for Stop). Held in Tauri state.
 #[derive(Default)]
 pub struct AgentState(pub std::sync::Arc<llm::AgentHandle>);
+
+/// The active project's filesystem watcher. Replacing it drops (stops) the
+/// previous one; held in Tauri state so it lives across command calls.
+#[derive(Default)]
+pub struct WatcherState(pub std::sync::Mutex<Option<notify::RecommendedWatcher>>);
+
+/// Whether a filesystem event should refresh the project tree: a structural
+/// change (create/delete/rename) to a path the tree actually shows (skips the
+/// build/VCS dirs it ignores anyway, so builds and git churn don't spam it).
+fn fs_event_refreshes_tree(res: &notify::Result<notify::Event>) -> bool {
+    use notify::event::ModifyKind;
+    use notify::EventKind;
+    let Ok(ev) = res else { return false };
+    let structural = matches!(
+        ev.kind,
+        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_))
+    );
+    structural
+        && ev.paths.iter().any(|p| {
+            !p.components().any(|c| {
+                c.as_os_str()
+                    .to_str()
+                    .map(|s| crate::fs_tree::SKIP_DIRS.contains(&s))
+                    .unwrap_or(false)
+            })
+        })
+}
+
+/// Watch the open project's directory for external changes (files created,
+/// deleted, or renamed outside the IDE — e.g. `touch` in a terminal, a branch
+/// checkout, a generator) and emit a debounced `fs:changed` event so the
+/// frontend can re-read the project tree. Called whenever the open project
+/// changes; the previous watcher is dropped.
+#[tauri::command]
+pub fn watch_project(
+    path: String,
+    app: tauri::AppHandle,
+    watcher_state: State<'_, WatcherState>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use notify::{RecursiveMode, Watcher};
+    let root = PathBuf::from(&path);
+    ensure_within_projects(&root, &state)?;
+
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+    let mut watcher =
+        notify::recommended_watcher(move |res| { let _ = tx.send(res); }).map_err(|e| format!("starting file watcher: {e}"))?;
+    watcher
+        .watch(&root, RecursiveMode::Recursive)
+        .map_err(|e| format!("watching {path}: {e}"))?;
+
+    // Coalesce bursts (a build, a checkout) into a single refresh, and only when
+    // something tree-visible actually changed. The thread ends when the watcher
+    // is dropped (its sender closes) — i.e. when the project changes or quits.
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        while let Ok(first) = rx.recv() {
+            let mut refresh = fs_event_refreshes_tree(&first);
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            while let Ok(ev) = rx.try_recv() {
+                refresh |= fs_event_refreshes_tree(&ev);
+            }
+            if refresh {
+                let _ = app2.emit("fs:changed", ());
+            }
+        }
+    });
+
+    *watcher_state.0.lock().unwrap() = Some(watcher);
+    Ok(())
+}
 
 /// Ensure rust-analyzer is running for `root`, (re)starting on project change.
 async fn ensure_client<'a>(

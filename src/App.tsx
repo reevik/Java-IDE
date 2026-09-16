@@ -24,7 +24,7 @@ import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
 import SpringView from "./components/SpringView";
 import RunConfigDialog from "./components/RunConfigDialog";
-import SettingsDialog, { loadModel, loadPreferredConnector, loadToolchainDir } from "./components/SettingsDialog";
+import SettingsDialog, { loadMavenPath, loadModel, loadPreferredConnector, loadToolchainDir } from "./components/SettingsDialog";
 import { bindingIndex, isRecordingKeymap, resolvedBindings, shortcutFromEvent, shortcutId } from "./lib/keymap";
 import TaskBoardDialog from "./components/TaskBoardDialog";
 import { loadCodeStyle } from "./lib/codeStyle";
@@ -64,6 +64,7 @@ import {
   springMains,
   springOverview,
   openProjectWindow,
+  setMavenPath,
   setModel,
   setPreferredConnector,
   setToolchainDir,
@@ -89,6 +90,7 @@ import {
   projectInfo,
   readFile,
   readProjectTree,
+  watchProject,
   writeFile,
   type StackFrame,
 } from "./lib/api";
@@ -225,6 +227,8 @@ export default function App() {
     if (conn) void setPreferredConnector(conn);
     const tc = loadToolchainDir();
     if (tc) void setToolchainDir(tc);
+    const mvn = loadMavenPath();
+    if (mvn) void setMavenPath(mvn);
     const cs = loadCodeStyle();
     void setCodeStyle(cs.kind, cs.path);
   }, []);
@@ -291,6 +295,22 @@ export default function App() {
     queryFn: () => readProjectTree(project!.path),
     enabled: !!project,
   });
+  // Watch the open project for external file changes (created/renamed/deleted
+  // outside the IDE, e.g. `touch` in a terminal) and refresh the tree.
+  useEffect(() => {
+    if (!project) return;
+    const path = project.path;
+    void watchProject(path)
+      // Pick up anything created before the watcher started (e.g. a file
+      // touched while the IDE wasn't watching yet).
+      .then(() => qc.invalidateQueries({ queryKey: ["tree", path] }))
+      .catch(() => {});
+    const un = listen("fs:changed", () => {
+      qc.invalidateQueries({ queryKey: ["tree", path] });
+      qc.invalidateQueries({ queryKey: ["modules", path] });
+    });
+    return () => { void un.then((off) => off()); };
+  }, [project?.path, qc]);
   const { data: info } = useQuery({
     queryKey: ["info", project?.path],
     queryFn: () => projectInfo(project!.path),
