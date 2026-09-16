@@ -5,10 +5,14 @@ interface Props {
   file: { name: string; content: string } | null;
   branch: string | null;
   cursor: { line: number; col: number };
+  /** The Java language server is importing/indexing the project. */
+  indexing?: boolean;
+  /** Optional detail from the language server (shown as a tooltip). */
+  indexingLabel?: string;
 }
 
 /** VS Code-style status bar shown beneath the editor. */
-export default function StatusBar({ file, branch, cursor }: Props) {
+export default function StatusBar({ file, branch, cursor, indexing, indexingLabel }: Props) {
   const indent = useMemo(() => detectIndent(file?.content ?? ""), [file?.content]);
   const lang = file ? langOf(file.name) : "";
 
@@ -18,6 +22,13 @@ export default function StatusBar({ file, branch, cursor }: Props) {
         <span className="flex items-center gap-1" title="Current git branch">
           <BranchIcon />
           {branch}
+        </span>
+      )}
+
+      {indexing && (
+        <span className="flex items-center gap-1.5 text-[var(--accent-strong)]" title={indexingLabel || "The Java language server is importing and compiling the project"}>
+          <IndexSpinner />
+          Indexing…
         </span>
       )}
 
@@ -65,6 +76,14 @@ function langOf(name: string): string {
       sh: "Shell",
       sql: "SQL",
     }[ext] ?? (ext ? ext.toUpperCase() : "Plain Text")
+  );
+}
+
+function IndexSpinner() {
+  return (
+    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" className="shrink-0 animate-spin">
+      <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
   );
 }
 

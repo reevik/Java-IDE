@@ -201,10 +201,13 @@ export default function SettingsDialog({ onClose }: Props) {
                         <Chevron open={!collapsed.has(node.id)} />
                         {node.label}
                       </button>
-                      {!collapsed.has(node.id) &&
-                        node.children.map((leaf) => (
-                          <NavItem key={leaf.id} active={sel === leaf.id} onClick={() => setSel(leaf.id)} label={leaf.label} indent />
-                        ))}
+                      {!collapsed.has(node.id) && (
+                        <div className="flex flex-col gap-0.5">
+                          {node.children.map((leaf) => (
+                            <NavItem key={leaf.id} active={sel === leaf.id} onClick={() => setSel(leaf.id)} label={leaf.label} indent />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <NavItem key={node.id} active={sel === node.id} onClick={() => setSel(node.id)} label={node.label} />

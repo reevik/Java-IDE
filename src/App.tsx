@@ -201,6 +201,11 @@ export default function App() {
   useEffect(() => localStorage.setItem("layout.treeHidden", treeHidden ? "1" : ""), [treeHidden]);
   useEffect(() => localStorage.setItem("layout.outputHidden", outputHidden ? "1" : ""), [outputHidden]);
 
+  // Java language-server import/index status (jdtls): busy while it resolves the
+  // build model + compiles, which is when Problems fills in after opening.
+  const [lspBusy, setLspBusy] = useState(false);
+  const [lspStatusMsg, setLspStatusMsg] = useState("");
+
   // Cargo run state
   const [lines, setLines] = useState<OutputLine[]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
@@ -567,6 +572,30 @@ export default function App() {
       un.then((off) => off());
     };
   }, []);
+
+  // Java language server (jdtls) import lifecycle: busy while it resolves the
+  // build model and compiles; ServiceReady/Started means it's done.
+  useEffect(() => {
+    const un = listen<{ type?: string; message?: string }>("lsp:status", (e) => {
+      const kind = e.payload.type ?? "";
+      const msg = e.payload.message ?? "";
+      if (kind === "ServiceReady" || kind === "Started") {
+        setLspBusy(false);
+        setLspStatusMsg("");
+      } else if (kind === "Starting") {
+        setLspBusy(true);
+        setLspStatusMsg(msg || "Indexing…");
+      } else if (msg) {
+        // Progress detail (Message/ProjectStatus) — only shown while busy.
+        setLspStatusMsg(msg);
+      }
+    });
+    return () => {
+      un.then((off) => off());
+    };
+  }, []);
+  // Clear stale status when switching projects (the LSP restarts and re-emits).
+  useEffect(() => { setLspBusy(false); setLspStatusMsg(""); }, [project?.path]);
 
   const applySuggestion = useCallback(
     (original: string, replacement: string) => {
@@ -2025,6 +2054,7 @@ export default function App() {
                 <OutputPanel
                   lines={lines}
                   diagnostics={allProblems}
+                  indexing={lspBusy}
                   running={running}
                   lastResult={lastResult}
                   command={command}
@@ -2165,6 +2195,8 @@ export default function App() {
         file={active && !active.loading ? { name: active.name, content: active.content } : null}
         branch={branch ?? null}
         cursor={cursor}
+        indexing={lspBusy}
+        indexingLabel={lspStatusMsg}
       />
 
       {quickOpen && (

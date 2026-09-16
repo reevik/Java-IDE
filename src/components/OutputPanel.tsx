@@ -28,6 +28,8 @@ interface Props {
   lines: OutputLine[];
   diagnostics: Diagnostic[];
   running: boolean;
+  /** The Java language server is still importing/indexing the project. */
+  indexing?: boolean;
   /** Exit status of the last run, null while running or before the first run. */
   lastResult: { code: number; secs: number } | null;
   command: string | null;
@@ -59,6 +61,7 @@ export default function OutputPanel({
   lines,
   diagnostics,
   running,
+  indexing,
   lastResult,
   command,
   onJump,
@@ -111,6 +114,7 @@ export default function OutputPanel({
       <header className="flex h-8 shrink-0 items-center gap-1 border-b border-[color:var(--line)] px-2">
         <TabButton active={tab === "problems"} onClick={() => onTab("problems")}>
           Problems
+          {indexing && <IndexSpinner />}
           {errors > 0 && <Badge tone="error">{errors}</Badge>}
           {warnings > 0 && <Badge tone="warn">{warnings}</Badge>}
         </TabButton>
@@ -207,9 +211,16 @@ export default function OutputPanel({
       ) : tab === "problems" ? (
         diagnostics.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-auto">
-            <p className="px-3 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
-              {running ? "Compiling…" : "No problems."}
-            </p>
+            {running ? (
+              <p className="px-3 py-6 text-center text-[12px] text-[var(--text-tertiary)]">Compiling…</p>
+            ) : indexing ? (
+              <div className="flex flex-col items-center gap-2 px-3 py-6 text-center">
+                <IndexSpinner />
+                <p className="text-[12px] text-[var(--text-tertiary)]">Indexing project… problems appear once the language server finishes importing.</p>
+              </div>
+            ) : (
+              <p className="px-3 py-6 text-center text-[12px] text-[var(--text-tertiary)]">No problems.</p>
+            )}
           </div>
         ) : (
           <ProblemsList diagnostics={diagnostics} onJump={onJump} />
@@ -300,6 +311,15 @@ function Badge({ tone, children }: { tone: "error" | "warn"; children: React.Rea
     >
       {children}
     </span>
+  );
+}
+
+/** Small spinner shown while the language server is importing/indexing. */
+function IndexSpinner() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" className="shrink-0 animate-spin text-[var(--accent)]">
+      <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
   );
 }
 
