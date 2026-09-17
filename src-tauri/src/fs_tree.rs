@@ -24,6 +24,7 @@ fn is_source(path: &Path) -> bool {
         ext,
         "java" | "kt" | "kts" | "gradle" | "xml" | "properties"
             | "md" | "json" | "yaml" | "yml" | "txt" | "sql" | "sh"
+            | "puml" | "plantuml" | "iuml" | "pu"
     ) {
         return true;
     }

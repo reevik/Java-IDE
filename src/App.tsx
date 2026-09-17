@@ -10,6 +10,7 @@ import CodeEditor, { type CodeEditorHandle, type Runnable } from "./components/C
 import OutputPanel, { type OutputLine, type OutputTab } from "./components/OutputPanel";
 import DiffView from "./components/DiffView";
 import MarkdownEditor from "./components/MarkdownEditor";
+import PlantUmlEditor from "./components/PlantUmlEditor";
 import ModulesView from "./components/ModulesView";
 import DependenciesView from "./components/DependenciesView";
 import BuildView, { GradleLogo, MavenLogo } from "./components/BuildView";
@@ -323,6 +324,8 @@ export default function App() {
     queryKey: ["tree", project?.path, showHidden],
     queryFn: () => readProjectTree(project!.path, showHidden),
     enabled: !!project,
+    // Keep the current tree on screen while toggling hidden files reloads it.
+    placeholderData: (prev) => prev,
   });
   // Watch the open project for external file changes (created/renamed/deleted
   // outside the IDE, e.g. `touch` in a terminal) and refresh the tree.
@@ -1190,6 +1193,15 @@ export default function App() {
         void openFile(created);
         return;
       }
+      if (kind === "plantuml") {
+        // A PlantUML diagram: <name>.puml, seeded with a minimal skeleton.
+        const base = name.replace(/\.(puml|plantuml|iuml|pu)$/i, "");
+        const created = await createFile(dir, `${base}.puml`);
+        await writeFile(created, `@startuml ${base}\n\n@enduml\n`);
+        await refresh();
+        void openFile(created);
+        return;
+      }
       const created = await createFile(dir, name);
       await refresh();
       void openFile(created);
@@ -1736,6 +1748,7 @@ export default function App() {
       { id: "view.close-split", group: "View", title: "Close Split", disabled: !split, disabledReason: "No split", run: () => closeSecTabs(secPaths) },
       { id: "file.new-file", group: "File", title: "New File…", hint: "⌘N", disabled: !project, disabledReason: noProject, run: () => window.dispatchEvent(new CustomEvent("rustade:new", { detail: "file" })) },
       { id: "file.new-class", group: "File", title: "New Java Class…", disabled: !project, disabledReason: noProject, run: () => window.dispatchEvent(new CustomEvent("rustade:new", { detail: "java" })) },
+      { id: "file.new-plantuml", group: "File", title: "New PlantUML…", disabled: !project, disabledReason: noProject, run: () => window.dispatchEvent(new CustomEvent("rustade:new", { detail: "plantuml" })) },
       { id: "file.new-dir", group: "File", title: "New Folder…", hint: "⌘⇧N", disabled: !project, disabledReason: noProject, run: () => window.dispatchEvent(new CustomEvent("rustade:new", { detail: "dir" })) },
       { id: "file.save", group: "File", title: "Save", hint: "⌘S", disabled: !active, disabledReason: "No file open", run: () => active && void saveNow(active.path) },
       { id: "file.close-tab", group: "File", title: "Close tab", hint: "⌘W", disabled: !active, disabledReason: "No file open", run: () => active && closeTab(active.path) },
@@ -1831,6 +1844,18 @@ export default function App() {
       return <div className="flex h-full items-center justify-center text-[12px] text-[var(--text-tertiary)]">Loading…</div>;
     }
     if (f.kind === "diff") return <DiffView text={f.content} />;
+    if (/\.(puml|plantuml|iuml|pu)$/i.test(f.path)) {
+      return (
+        <PlantUmlEditor
+          key={`puml:${f.path}#${f.rev}`}
+          initial={f.content}
+          onChange={(text) => onEdit(f.path, text)}
+          onSave={() => void saveNow(f.path)}
+          onCursor={(line, col) => setCursor({ line, col })}
+          readOnly={f.readOnly}
+        />
+      );
+    }
     if (/\.(md|markdown)$/i.test(f.path)) {
       return (
         <MarkdownEditor

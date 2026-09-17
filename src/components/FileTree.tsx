@@ -29,7 +29,7 @@ function saveCollapsed(root: string, set: Set<string>) {
   }
 }
 
-export type NewKind = "file" | "java" | "dir";
+export type NewKind = "file" | "java" | "plantuml" | "dir";
 
 /** A tree node augmented for display: source-root role + flattened-package flag. */
 type UiNode = TreeNode & { rootKind?: RootKind; isPackage?: boolean; children?: UiNode[] | null };
@@ -126,12 +126,14 @@ function basename(p: string) {
 
 const MENU: { kind: NewKind; label: string }[] = [
   { kind: "java", label: "New Java Class" },
+  { kind: "plantuml", label: "New PlantUML" },
   { kind: "file", label: "New File" },
   { kind: "dir", label: "New Directory" },
 ];
 
 const PROMPT: Record<NewKind, { title: string; placeholder: string; hint?: string }> = {
   java: { title: "New Java class", placeholder: "Widget", hint: "“.java” is added automatically" },
+  plantuml: { title: "New PlantUML diagram", placeholder: "sequence", hint: "“.puml” is added automatically" },
   file: { title: "New file", placeholder: "notes.md" },
   dir: { title: "New directory", placeholder: "assets" },
 };
@@ -141,8 +143,11 @@ interface Menu { x: number; y: number; dir: string; targets: string[] }
 export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onMove, onCopy, onUndo, onOpenStructure, showHidden, onToggleHidden }: Props) {
   const navRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(rootPath));
+  // Directory paths seen so far, to tell apart the first population from later
+  // ones where directories appear (show-hidden toggle, external creation).
+  const seenDirsRef = useRef<Set<string> | null>(null);
   // Restore the saved expand/collapse state when switching projects.
-  useEffect(() => setCollapsed(loadCollapsed(rootPath)), [rootPath]);
+  useEffect(() => { setCollapsed(loadCollapsed(rootPath)); seenDirsRef.current = null; }, [rootPath]);
   // Set + persist in one step so the tree state survives a restart.
   const writeCollapsed = (next: Set<string>) => { setCollapsed(next); saveCollapsed(rootPath, next); };
   const [filter, setFilter] = useState("");
@@ -163,10 +168,27 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
 
   // A freshly-opened project starts fully collapsed instead of expanding the
   // whole hierarchy (which is slow on large trees) — the user expands what they
-  // need, and that choice is then remembered.
+  // need, and that choice is then remembered. Directories that appear LATER
+  // (revealed by the show-hidden toggle, or created externally) default to
+  // collapsed too, so they don't dump their expanded contents into the tree.
   useEffect(() => {
-    if (!decorated.length || hasSavedCollapse(rootPath)) return;
-    writeCollapsed(new Set(allDirPaths(decorated)));
+    if (!decorated.length) return;
+    const allDirs = allDirPaths(decorated);
+    if (seenDirsRef.current === null) {
+      seenDirsRef.current = new Set(allDirs);
+      if (!hasSavedCollapse(rootPath)) writeCollapsed(new Set(allDirs));
+      return;
+    }
+    const fresh = allDirs.filter((p) => !seenDirsRef.current!.has(p));
+    for (const p of allDirs) seenDirsRef.current!.add(p);
+    if (fresh.length) {
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        for (const p of fresh) next.add(p);
+        saveCollapsed(rootPath, next);
+        return next;
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decorated, rootPath]);
   const shown = useMemo(() => (filtering ? filterTree(decorated, filter.trim()) : decorated), [decorated, filter, filtering]);

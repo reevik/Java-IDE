@@ -84,6 +84,8 @@ pub fn run() {
                 MenuItem::with_id(handle, "file.new-file", "New File", true, None::<&str>)?;
             let new_class =
                 MenuItem::with_id(handle, "file.new-class", "New Java Class…", true, None::<&str>)?;
+            let new_plantuml =
+                MenuItem::with_id(handle, "file.new-plantuml", "New PlantUML…", true, None::<&str>)?;
             let new_dir = MenuItem::with_id(
                 handle,
                 "file.new-dir",
@@ -97,6 +99,7 @@ pub fn run() {
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .item(&new_file)
                 .item(&new_class)
+                .item(&new_plantuml)
                 .item(&new_dir)
                 .separator()
                 .item(&save)
