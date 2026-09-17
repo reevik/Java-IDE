@@ -24,6 +24,12 @@ export default function DependenciesView({ root }: { root: string }) {
   });
   const { data: mods } = useQuery({ queryKey: ["modules", root], queryFn: () => projectModules(root) });
   const [filter, setFilter] = useState("");
+  // Expand/collapse-all: bumping the epoch remounts the rows with a forced
+  // initial open state (per-row expansion is local, so a remount applies it).
+  const [epoch, setEpoch] = useState(0);
+  const [allMode, setAllMode] = useState<boolean | null>(null);
+  const expandAll = () => { setAllMode(true); setEpoch((e) => e + 1); };
+  const collapseAll = () => { setAllMode(false); setEpoch((e) => e + 1); };
   const q = filter.trim().toLowerCase();
 
   const tree = useMemo(() => (data ? filterDeps(data, q) : []), [data, q]);
@@ -62,16 +68,33 @@ export default function DependenciesView({ root }: { root: string }) {
         ) : tree.length === 0 ? (
           <Center>{q ? "No matching dependencies." : "No dependencies."}</Center>
         ) : (
-          tree.map((n, i) => <DepTreeRow key={`${n.name}-${i}`} node={n} depth={0} forceOpen={!!q} />)
+          tree.map((n, i) => <DepTreeRow key={`${epoch}:${n.name}-${i}`} node={n} depth={0} forceOpen={!!q} defaultOpen={allMode} />)
         )}
       </div>
+
+      {!isLoading && !isError && data && tree.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1 border-t border-[color:var(--line)] px-2 py-1.5">
+          <button onClick={expandAll} title="Expand all" aria-label="Expand all" className="grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)]"><ExpandGlyph expanded /></button>
+          <button onClick={collapseAll} title="Collapse all" aria-label="Collapse all" className="grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)]"><ExpandGlyph /></button>
+        </div>
+      )}
     </div>
   );
 }
 
-function DepTreeRow({ node, depth, forceOpen }: { node: DepNode; depth: number; forceOpen?: boolean }) {
+/** Chevrons pointing apart (expand) or together (collapse). */
+function ExpandGlyph({ expanded }: { expanded?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      {expanded ? <path d="M8 4l-4 4 4 4M16 20l4-4-4-4" /> : <path d="M4 8l4-4 4 4M20 16l-4 4-4-4" />}
+    </svg>
+  );
+}
+
+function DepTreeRow({ node, depth, forceOpen, defaultOpen }: { node: DepNode; depth: number; forceOpen?: boolean; defaultOpen?: boolean | null }) {
   const hasChildren = node.children.length > 0;
-  const [openState, setOpen] = useState(depth === 0);
+  // Expand-all forces open; collapse-all (or default) leaves only the roots open.
+  const [openState, setOpen] = useState(defaultOpen === true ? true : depth === 0);
   const open = forceOpen || openState;
   return (
     <div>
@@ -87,7 +110,7 @@ function DepTreeRow({ node, depth, forceOpen }: { node: DepNode; depth: number; 
         {node.dedup && <span className="shrink-0 px-1 text-[10px] text-[var(--text-tertiary)]" title="Repeated — see its first occurrence">↻</span>}
         <span className="shrink-0 pr-2 font-mono text-[10.5px] text-[var(--text-tertiary)]">{node.version}</span>
       </div>
-      {open && hasChildren && node.children.map((c, i) => <DepTreeRow key={`${c.name}-${i}`} node={c} depth={depth + 1} forceOpen={forceOpen} />)}
+      {open && hasChildren && node.children.map((c, i) => <DepTreeRow key={`${c.name}-${i}`} node={c} depth={depth + 1} forceOpen={forceOpen} defaultOpen={defaultOpen} />)}
     </div>
   );
 }

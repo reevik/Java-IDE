@@ -38,6 +38,12 @@ export default function ModulesView({ root, activePath, onOpen }: Props) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Expand/collapse-all: bumping the epoch remounts the tree with a forced
+  // initial open state (per-row expansion is local, so a remount applies it).
+  const [epoch, setEpoch] = useState(0);
+  const [allMode, setAllMode] = useState<boolean | null>(null);
+  const expandAll = () => { setAllMode(true); setEpoch((e) => e + 1); };
+  const collapseAll = () => { setAllMode(false); setEpoch((e) => e + 1); };
 
   // The module to nest the new one under: the selected (active) module, else the
   // crate root. Inline modules and non-file entries fall back to the crate root.
@@ -115,18 +121,34 @@ export default function ModulesView({ root, activePath, onOpen }: Props) {
 
       <div className="min-h-0 flex-1 overflow-auto pb-4 text-[12.5px]">
         <ModuleRow
+          key={epoch}
           node={{ name: data.crate_name, path: "crate", file: data.root_file, inline: false, children: shown }}
           depth={0}
           activePath={activePath}
           onOpen={onOpen}
           filtering={!!q}
+          defaultOpen={allMode}
           isCrate
         />
         {q && shown.length === 0 && (
           <p className="px-3 py-1 text-[11.5px] text-[var(--text-tertiary)]">No matching packages.</p>
         )}
       </div>
+
+      <div className="flex shrink-0 items-center gap-1 border-t border-[color:var(--line)] px-2 py-1.5">
+        <button onClick={expandAll} title="Expand all" aria-label="Expand all" className="grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)]"><ExpandGlyph expanded /></button>
+        <button onClick={collapseAll} title="Collapse all" aria-label="Collapse all" className="grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)]"><ExpandGlyph /></button>
+      </div>
     </div>
+  );
+}
+
+/** Chevrons pointing apart (expand) or together (collapse). */
+function ExpandGlyph({ expanded }: { expanded?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      {expanded ? <path d="M8 4l-4 4 4 4M16 20l4-4-4-4" /> : <path d="M4 8l4-4 4 4M20 16l-4 4-4-4" />}
+    </svg>
   );
 }
 
@@ -136,6 +158,7 @@ function ModuleRow({
   activePath,
   onOpen,
   filtering,
+  defaultOpen,
   isCrate,
 }: {
   node: ModuleNode;
@@ -143,9 +166,11 @@ function ModuleRow({
   activePath: string | null;
   onOpen: (p: string, line?: number) => void;
   filtering?: boolean;
+  defaultOpen?: boolean | null;
   isCrate?: boolean;
 }) {
-  const [openState, setOpen] = useState(depth === 0);
+  // Expand-all forces open; collapse-all (or default) leaves only the roots open.
+  const [openState, setOpen] = useState(defaultOpen === true ? true : depth === 0);
   const open = filtering || openState;
   const hasFile = !!node.file && !node.inline;
   const expandable = node.children.length > 0 || hasFile;
@@ -178,7 +203,7 @@ function ModuleRow({
         <>
           {hasFile && !filtering && <SymbolTree file={node.file!} depth={depth + 1} onOpen={onOpen} />}
           {node.children.map((c) => (
-            <ModuleRow key={c.path} node={c} depth={depth + 1} activePath={activePath} onOpen={onOpen} filtering={filtering} />
+            <ModuleRow key={c.path} node={c} depth={depth + 1} activePath={activePath} onOpen={onOpen} filtering={filtering} defaultOpen={defaultOpen} />
           ))}
         </>
       )}

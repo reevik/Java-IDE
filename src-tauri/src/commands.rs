@@ -1023,12 +1023,17 @@ pub async fn spring_overview(root: String, state: State<'_, AppState>) -> Result
 // --- Files ------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn read_project_tree(path: String, state: State<'_, AppState>) -> Result<Vec<TreeNode>, String> {
+pub async fn read_project_tree(
+    path: String,
+    show_hidden: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<Vec<TreeNode>, String> {
     let p = PathBuf::from(&path);
     ensure_within_projects(&p, &state)?;
+    let show_hidden = show_hidden.unwrap_or(false);
     // The recursive filesystem walk can be heavy on a large project — run it off
     // the UI thread so the app stays responsive while the tree loads.
-    tokio::task::spawn_blocking(move || fs_tree::read_tree(&p))
+    tokio::task::spawn_blocking(move || fs_tree::read_tree(&p, show_hidden))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
@@ -2276,6 +2281,77 @@ pub fn set_preferred_connector(id: Option<String>) {
     llm::set_preferred(id);
 }
 
+/// An MCP server configured for the Claude CLI, with its health status.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServer {
+    pub name: String,
+    /// The command or URL backing the server.
+    pub detail: String,
+    /// "connected" | "failed" | "unknown".
+    pub status: String,
+}
+
+/// Parse `claude mcp list` output into (name, detail, status) rows. The health
+/// check renders lines like `name: cmd/url - ✓ Connected` / `… - ✗ Failed to connect`.
+fn parse_mcp_list(text: &str) -> Vec<McpServer> {
+    let mut out = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with("Checking MCP") || line.starts_with("No MCP servers") {
+            continue;
+        }
+        let Some((name, rest)) = line.split_once(':') else { continue };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let rest = rest.trim();
+        let lower = rest.to_lowercase();
+        let status = if rest.contains('✓') || lower.contains("connected") {
+            "connected"
+        } else if rest.contains('✗') || lower.contains("failed") || lower.contains("error") {
+            "failed"
+        } else {
+            "unknown"
+        };
+        // Drop the trailing " - <status>" so `detail` is just the command/URL.
+        let detail = rest.rsplit_once(" - ").map(|(d, _)| d.trim()).unwrap_or(rest).to_string();
+        out.push(McpServer { name: name.to_string(), detail, status: status.to_string() });
+    }
+    out
+}
+
+/// List the MCP servers available to the Claude CLI in this project (user,
+/// project `.mcp.json`, and local scopes), running its health check for status.
+#[tauri::command]
+pub async fn mcp_servers(root: String, state: State<'_, AppState>) -> Result<Vec<McpServer>, String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    let cli = llm::find_claude_cli()
+        .ok_or("The Claude CLI isn't installed, so MCP servers can't be listed. Install it to use MCP.")?;
+    // Ensure `node` (the CLI's runtime) is findable even under a Finder-launched
+    // app's minimal PATH.
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let cli_dir = cli.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let path = format!("{cli_dir}:/opt/homebrew/bin:/usr/local/bin:{existing}");
+
+    let out = tokio::process::Command::new(&cli)
+        .arg("mcp")
+        .arg("list")
+        .current_dir(&r)
+        .env("PATH", path)
+        .output()
+        .await
+        .map_err(|e| format!("running `claude mcp list`: {e}"))?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok(parse_mcp_list(&text))
+}
+
 /// An agent skill (a `SKILL.md` directory) for the Skills panel.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -3234,6 +3310,23 @@ async fn ensure_client<'a>(
         );
     }
     Ok(guard.as_ref().expect("just started"))
+}
+
+/// Start the Java language server for `root` if it isn't already running, so the
+/// project import/indexing begins as soon as the project opens (rather than
+/// waiting for the first Java file to be opened). Errors are non-fatal.
+#[tauri::command]
+pub async fn lsp_start(
+    root: String,
+    app: tauri::AppHandle,
+    lsp: State<'_, LspState>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let r = PathBuf::from(&root);
+    ensure_within_projects(&r, &state)?;
+    let mut guard = lsp.0.lock().await;
+    ensure_client(&mut guard, &app, &root).await?;
+    Ok(())
 }
 
 #[tauri::command]

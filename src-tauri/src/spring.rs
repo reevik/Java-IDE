@@ -153,6 +153,10 @@ fn stereotype_kind(ann: &str) -> Option<&'static str> {
         "Repository" => Some("repository"),
         "Controller" | "RestController" => Some("controller"),
         "Configuration" => Some("configuration"),
+        // The Spring Boot entry point (meta-@Configuration + @ComponentScan). Listed
+        // so a reactor/app whose only Spring annotation is the main class still
+        // registers as a Spring project.
+        "SpringBootApplication" => Some("configuration"),
         _ => None,
     }
 }

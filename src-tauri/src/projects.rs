@@ -339,23 +339,40 @@ fn fqcn_of(src: &str, file: &Path) -> Option<String> {
 /// Source roots to scan: `<root>/src/main/java` plus each module's, if any.
 pub fn java_source_roots(dir: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
+    collect_source_roots(dir, 0, &mut roots);
+    roots
+}
+
+/// Recursively collect every `src/main/java` under `dir` — the root plus all
+/// reactor modules, however deeply nested (e.g. `backend/api/src/main/java`, or
+/// modules grouped under an intermediate folder). Skips build/VCS dirs and is
+/// depth-capped so a pathological tree can't run away. This is what makes a
+/// multi-module (reactor) project's Spring beans/endpoints and `@SpringBootApplication`
+/// mains discoverable even when the code lives only in submodules.
+fn collect_source_roots(dir: &Path, depth: usize, roots: &mut Vec<PathBuf>) {
+    if depth > 6 {
+        return;
+    }
     let here = dir.join("src/main/java");
     if here.is_dir() {
         roots.push(here);
     }
-    // One level of Maven/Gradle modules (child dirs holding their own build file).
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() && is_java_project(&p) {
-                let sr = p.join("src/main/java");
-                if sr.is_dir() {
-                    roots.push(sr);
-                }
-            }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
         }
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if matches!(
+            name.as_ref(),
+            "target" | "build" | ".git" | "node_modules" | ".metadata" | "src" | ".idea" | ".vscode" | "dist" | ".gradle"
+        ) {
+            continue;
+        }
+        collect_source_roots(&p, depth + 1, roots);
     }
-    roots
 }
 
 /// Registers a directory as a project, keeping the list newest-first and unique.

@@ -34,14 +34,14 @@ fn is_source(path: &Path) -> bool {
     )
 }
 
-pub fn read_tree(root: &Path) -> Result<Vec<TreeNode>> {
+pub fn read_tree(root: &Path, show_hidden: bool) -> Result<Vec<TreeNode>> {
     if !root.is_dir() {
         bail!("{} is not a directory", root.display());
     }
-    Ok(collect(root, 0))
+    Ok(collect(root, 0, show_hidden))
 }
 
-fn collect(dir: &Path, depth: usize) -> Vec<TreeNode> {
+fn collect(dir: &Path, depth: usize, show_hidden: bool) -> Vec<TreeNode> {
     if depth > 12 {
         return Vec::new();
     }
@@ -58,21 +58,26 @@ fn collect(dir: &Path, depth: usize) -> Vec<TreeNode> {
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        if name.is_empty() || name.starts_with('.') && name != ".cargo" {
+        if name.is_empty() {
+            continue;
+        }
+        // Normally hidden: dotfiles/dot-dirs and the build/tooling dirs. Revealed
+        // when `show_hidden` is on (the file tree's toggle).
+        if !show_hidden && name.starts_with('.') && name != ".cargo" {
             continue;
         }
         if path.is_dir() {
-            if SKIP_DIRS.contains(&name.as_str()) {
+            if !show_hidden && SKIP_DIRS.contains(&name.as_str()) {
                 continue;
             }
             dirs.push(TreeNode {
                 name,
                 path: path.to_string_lossy().to_string(),
                 kind: "dir",
-                children: Some(collect(&path, depth + 1)),
+                children: Some(collect(&path, depth + 1, show_hidden)),
                 java_kind: None,
             });
-        } else if is_source(&path) {
+        } else if show_hidden || is_source(&path) {
             let java_kind = if name.ends_with(".java") { classify_java(&path) } else { None };
             files.push(TreeNode {
                 name,

@@ -44,6 +44,7 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "view.ai", label: "Toggle Intelligent Review", group: "View" },
   { id: "view.chat", label: "Toggle AI Assistant", group: "View" },
   { id: "view.skills", label: "Toggle Skills", group: "View" },
+  { id: "view.mcp", label: "Toggle MCP Servers", group: "View" },
   { id: "view.taskboard", label: "Task Board", group: "View" },
   { id: "ai.review", label: "Review File", group: "AI" },
   { id: "ai.explain", label: "Explain Selection / File", group: "AI" },
@@ -80,6 +81,7 @@ const DEFAULT_MAP: Record<string, string> = {
   "view.ai": "⌘⌥3",
   "view.chat": "⌘⌥4",
   "view.skills": "⌘⌥5",
+  "view.mcp": "⌘⌥6",
   "ai.review": "⌘⇧A",
   "ai.explain": "⌘⇧E",
 };

@@ -395,8 +395,15 @@ impl LspClient {
                             }
                             let _ = app.emit("lsp:status", params.clone());
                         }
+                    } else if msg.get("method").and_then(Value::as_str) == Some("$/progress") {
+                        // WorkDoneProgress: jdtls reports its project import/build
+                        // here — {token, value:{kind:"begin"|"report"|"end", title,
+                        // message, percentage}}. Drives the "Indexing…" indicator.
+                        if let Some(params) = msg.get("params") {
+                            let _ = app.emit("lsp:progress", params.clone());
+                        }
                     }
-                    // other notifications (progress, logs) are ignored.
+                    // other notifications (logs) are ignored.
                 }
             });
         }
@@ -480,7 +487,10 @@ impl LspClient {
                                 }
                             }
                         },
-                        "workspace": { "configuration": true, "workspaceFolders": true }
+                        "workspace": { "configuration": true, "workspaceFolders": true },
+                        // Accept server-initiated work-done progress so jdtls
+                        // reports its (long) project import/build via `$/progress`.
+                        "window": { "workDoneProgress": true }
                     }
                 }),
                 Duration::from_secs(30),

@@ -58,6 +58,10 @@ interface Props {
   onUndo: () => void;
   /** Open the Project Structure dialog (mark source/resource/test roots). */
   onOpenStructure: () => void;
+  /** Whether normally-hidden entries (build dirs, dotfiles) are shown. */
+  showHidden?: boolean;
+  /** Toggle showing hidden entries. */
+  onToggleHidden?: () => void;
 }
 
 /** Every directory node path in the (already decorated) tree — for "Collapse all". */
@@ -134,7 +138,7 @@ const PROMPT: Record<NewKind, { title: string; placeholder: string; hint?: strin
 
 interface Menu { x: number; y: number; dir: string; targets: string[] }
 
-export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onMove, onCopy, onUndo, onOpenStructure }: Props) {
+export default function FileTree({ tree, loading, rootPath, selectedPath, problemPaths, sourceRoots, onOpen, onCreate, onDelete, onMove, onCopy, onUndo, onOpenStructure, showHidden, onToggleHidden }: Props) {
   const navRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(rootPath));
   // Restore the saved expand/collapse state when switching projects.
@@ -443,17 +447,30 @@ export default function FileTree({ tree, loading, rootPath, selectedPath, proble
         <button
           onClick={() => writeCollapsed(new Set())}
           title="Expand all"
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--hover)]"
+          aria-label="Expand all"
+          className="grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)]"
         >
-          <ExpandGlyph expanded /> Expand all
+          <ExpandGlyph expanded />
         </button>
         <button
           onClick={() => writeCollapsed(new Set(allDirPaths(decorated)))}
           title="Collapse all"
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--hover)]"
+          aria-label="Collapse all"
+          className="grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--hover)]"
         >
-          <ExpandGlyph /> Collapse all
+          <ExpandGlyph />
         </button>
+        {onToggleHidden && (
+          <button
+            onClick={onToggleHidden}
+            title={showHidden ? "Hide build/tooling files (target, dotfiles…)" : "Show hidden files (target, dotfiles…)"}
+            aria-label="Toggle hidden files"
+            aria-pressed={showHidden}
+            className={`ml-auto grid h-6 w-6 place-items-center rounded-md hover:bg-[var(--hover)] ${showHidden ? "text-[var(--accent-strong)]" : "text-[var(--text-secondary)]"}`}
+          >
+            <EyeGlyph off={!showHidden} />
+          </button>
+        )}
       </div>
 
       {menu && (
@@ -699,6 +716,17 @@ function ExpandGlyph({ expanded }: { expanded?: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
       {expanded ? <path d="M8 4l-4 4 4 4M16 20l4-4-4-4" /> : <path d="M4 8l4-4 4 4M20 16l-4 4-4-4" />}
+    </svg>
+  );
+}
+
+/** Eye icon; a slash through it when hidden files are off. */
+function EyeGlyph({ off }: { off?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+      {off && <path d="M3 3l18 18" />}
     </svg>
   );
 }

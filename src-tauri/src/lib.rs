@@ -249,6 +249,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let toggle_mcp = MenuItem::with_id(
+                handle,
+                "view.mcp",
+                "Toggle MCP Servers",
+                true,
+                None::<&str>,
+            )?;
             let split_right =
                 MenuItem::with_id(handle, "view.split-right", "Split Right", true, None::<&str>)?;
             let split_down =
@@ -266,6 +273,7 @@ pub fn run() {
                 .item(&toggle_ai)
                 .item(&toggle_chat)
                 .item(&toggle_skills)
+                .item(&toggle_mcp)
                 .separator()
                 .item(&split_right)
                 .item(&split_down)
@@ -402,6 +410,7 @@ pub fn run() {
             commands::detected_jdks,
             commands::detected_mavens,
             commands::set_maven_path,
+            commands::mcp_servers,
             commands::project_modules,
             commands::dependency_tree,
             commands::create_module,
@@ -445,6 +454,7 @@ pub fn run() {
             commands::format_java,
             commands::set_code_style,
             commands::organize_imports,
+            commands::lsp_start,
             commands::lsp_completion,
             commands::lsp_hover,
             commands::lsp_definition,

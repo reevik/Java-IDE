@@ -107,8 +107,8 @@ export function projectInfo(path: string): Promise<ProjectInfo> {
 
 // --- Files ---
 
-export function readProjectTree(path: string): Promise<TreeNode[]> {
-  return invoke("read_project_tree", { path });
+export function readProjectTree(path: string, showHidden = false): Promise<TreeNode[]> {
+  return invoke("read_project_tree", { path, showHidden });
 }
 /** Watch `path` for external file changes; the backend emits `fs:changed`. */
 export function watchProject(path: string): Promise<void> {
@@ -430,6 +430,18 @@ export function listSkills(root: string | null, extraDirs: string[]): Promise<Sk
   return invoke("list_skills", { root, extraDirs });
 }
 
+export interface McpServer {
+  name: string;
+  /** The command or URL backing the server. */
+  detail: string;
+  /** "connected" | "failed" | "unknown". */
+  status: "connected" | "failed" | "unknown";
+}
+/** MCP servers configured for the Claude CLI in `root`, with health status. */
+export function mcpServers(root: string): Promise<McpServer[]> {
+  return invoke("mcp_servers", { root });
+}
+
 export function appVersion(): Promise<string> {
   return invoke("app_version");
 }
@@ -583,6 +595,10 @@ export interface LspCompletion {
 /** Open/update a file in rust-analyzer so it re-checks and pushes diagnostics. */
 export function lspSync(root: string, path: string, text: string): Promise<void> {
   return invoke("lsp_sync", { root, path, text });
+}
+/** Start the Java language server for `root` so indexing begins on project open. */
+export function lspStart(root: string): Promise<void> {
+  return invoke("lsp_start", { root });
 }
 
 /** Tell rust-analyzer the file was saved, triggering a cargo-check refresh. */

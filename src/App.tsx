@@ -19,6 +19,7 @@ import SearchOverlay from "./components/SearchOverlay";
 import AiPanel from "./components/AiPanel";
 import ChatPanel from "./components/ChatPanel";
 import SkillsPanel from "./components/SkillsPanel";
+import McpPanel from "./components/McpPanel";
 import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
 import RunConfigBar from "./components/RunConfigBar";
@@ -87,6 +88,7 @@ import {
   lspClassFileContents,
   lspDidSave,
   lspSync,
+  lspStart,
   projectInfo,
   readFile,
   readProjectTree,
@@ -175,9 +177,9 @@ export default function App() {
   const [showSearch, setShowSearch] = useState(false);
   const [aiWidth, setAiWidth] = useState(() => num("layout.ai", 300));
   // Right side: "review" (Intelligent Review) | "chat" (Vibe Coder) | null (hidden).
-  const [rightPanel, setRightPanel] = useState<"review" | "chat" | "skills" | null>(() => {
+  const [rightPanel, setRightPanel] = useState<"review" | "chat" | "skills" | "mcp" | null>(() => {
     const v = localStorage.getItem("layout.rightPanel");
-    return v === "chat" ? "chat" : v === "skills" ? "skills" : v === "hidden" ? null : "review";
+    return v === "chat" ? "chat" : v === "skills" ? "skills" : v === "mcp" ? "mcp" : v === "hidden" ? null : "review";
   });
   const [selection, setSelection] = useState("");
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
@@ -202,9 +204,16 @@ export default function App() {
   useEffect(() => localStorage.setItem("layout.outputHidden", outputHidden ? "1" : ""), [outputHidden]);
 
   // Java language-server import/index status (jdtls): busy while it resolves the
-  // build model + compiles, which is when Problems fills in after opening.
-  const [lspBusy, setLspBusy] = useState(false);
-  const [lspStatusMsg, setLspStatusMsg] = useState("");
+  // build model + compiles, which is when Problems fills in after opening. Two
+  // signals — the coarse `language/status` lifecycle and the accurate
+  // `$/progress` work-done reports for the long import/build — are combined.
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [progressBusy, setProgressBusy] = useState(false);
+  const [progressMsg, setProgressMsg] = useState("");
+  const progressTokens = useRef<Set<string>>(new Set());
+  const lspBusy = statusBusy || progressBusy;
+  const lspStatusMsg = progressMsg || statusMsg;
 
   // Cargo run state
   const [lines, setLines] = useState<OutputLine[]>([]);
@@ -295,9 +304,24 @@ export default function App() {
   const activeEditor = () => (activeGroupRef.current === 1 ? editorRef2 : editorRef).current;
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // Show normally-hidden entries (build/tooling dirs like target, plus dotfiles)
+  // in the Project tree — toggled from its footer, persisted per project.
+  const [showHidden, setShowHidden] = useState(false);
+  useEffect(() => {
+    if (!project) return;
+    try { setShowHidden(localStorage.getItem(`tree.showHidden:${project.path}`) === "1"); } catch { setShowHidden(false); }
+  }, [project?.path]);
+  const toggleHidden = useCallback(() => {
+    setShowHidden((v) => {
+      const next = !v;
+      try { if (projectRef.current) localStorage.setItem(`tree.showHidden:${projectRef.current}`, next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   const { data: tree, isFetching: treeLoading } = useQuery({
-    queryKey: ["tree", project?.path],
-    queryFn: () => readProjectTree(project!.path),
+    queryKey: ["tree", project?.path, showHidden],
+    queryFn: () => readProjectTree(project!.path, showHidden),
     enabled: !!project,
   });
   // Watch the open project for external file changes (created/renamed/deleted
@@ -573,29 +597,54 @@ export default function App() {
     };
   }, []);
 
-  // Java language server (jdtls) import lifecycle: busy while it resolves the
-  // build model and compiles; ServiceReady/Started means it's done.
+  // Java language server (jdtls) coarse import lifecycle: Starting → busy,
+  // ServiceReady/Started → the server is up (but a big import may still be
+  // running, tracked by `$/progress` below).
   useEffect(() => {
     const un = listen<{ type?: string; message?: string }>("lsp:status", (e) => {
       const kind = e.payload.type ?? "";
       const msg = e.payload.message ?? "";
       if (kind === "ServiceReady" || kind === "Started") {
-        setLspBusy(false);
-        setLspStatusMsg("");
+        setStatusBusy(false);
+        setStatusMsg("");
       } else if (kind === "Starting") {
-        setLspBusy(true);
-        setLspStatusMsg(msg || "Indexing…");
+        setStatusBusy(true);
+        setStatusMsg(msg || "Starting Java language server…");
       } else if (msg) {
-        // Progress detail (Message/ProjectStatus) — only shown while busy.
-        setLspStatusMsg(msg);
+        setStatusMsg(msg);
       }
     });
-    return () => {
-      un.then((off) => off());
-    };
+    return () => { un.then((off) => off()); };
   }, []);
-  // Clear stale status when switching projects (the LSP restarts and re-emits).
-  useEffect(() => { setLspBusy(false); setLspStatusMsg(""); }, [project?.path]);
+
+  // jdtls work-done progress: the accurate signal for the long project
+  // import/build. Busy while any progress token is active.
+  useEffect(() => {
+    type Progress = { token?: string | number; value?: { kind?: string; title?: string; message?: string; percentage?: number } };
+    const un = listen<Progress>("lsp:progress", (e) => {
+      const token = String(e.payload.token ?? "");
+      const v = e.payload.value ?? {};
+      const set = progressTokens.current;
+      if (v.kind === "begin") set.add(token);
+      else if (v.kind === "end") set.delete(token);
+      const label = [v.title, v.message].filter(Boolean).join(" — ");
+      if (v.kind !== "end" && label) {
+        setProgressMsg(v.percentage != null ? `${label} (${v.percentage}%)` : label);
+      }
+      setProgressBusy(set.size > 0);
+      if (set.size === 0) setProgressMsg("");
+    });
+    return () => { un.then((off) => off()); };
+  }, []);
+
+  // Start the language server as soon as a project opens (don't wait for the
+  // first file), and clear any stale status from the previous project.
+  useEffect(() => {
+    setStatusBusy(false); setStatusMsg("");
+    setProgressBusy(false); setProgressMsg("");
+    progressTokens.current.clear();
+    if (project) void lspStart(project.path).catch(() => {});
+  }, [project?.path]);
 
   const applySuggestion = useCallback(
     (original: string, replacement: string) => {
@@ -1698,6 +1747,7 @@ export default function App() {
       { id: "view.ai", group: "View", title: rightPanel === "review" ? "Hide Intelligent Review" : "Intelligent Review", hint: "⌘⌥3", run: () => setRightPanel((p) => (p === "review" ? null : "review")) },
       { id: "view.chat", group: "View", title: rightPanel === "chat" ? "Hide AI Assistant" : "AI Assistant", hint: "⌘⌥4", run: () => setRightPanel((p) => (p === "chat" ? null : "chat")) },
       { id: "view.skills", group: "View", title: rightPanel === "skills" ? "Hide Skills" : "Skills", hint: "⌘⌥5", run: () => setRightPanel((p) => (p === "skills" ? null : "skills")) },
+      { id: "view.mcp", group: "View", title: rightPanel === "mcp" ? "Hide MCP Servers" : "MCP Servers", hint: "⌘⌥6", run: () => setRightPanel((p) => (p === "mcp" ? null : "mcp")) },
       { id: "ai.review", group: "AI", title: "Review file", hint: "⌘⇧A", disabled: !active, disabledReason: "No file open", run: () => { setRightPanel("review"); setTimeout(() => window.dispatchEvent(new Event("rustade:ai-review")), 40); } },
       { id: "ai.explain", group: "AI", title: "Explain selection / file", hint: "⌘⇧E", disabled: !active, disabledReason: "No file open", run: () => { setRightPanel("review"); setTimeout(() => window.dispatchEvent(new Event("rustade:ai-explain")), 40); } },
       { id: "project.open", group: "Project", title: "Open project…", hint: "⌘⇧O", run: openLauncher },
@@ -1985,6 +2035,8 @@ export default function App() {
                     onCopy={copyInTree}
                     onUndo={undoTree}
                     onOpenStructure={() => setStructureOpen(true)}
+                    showHidden={showHidden}
+                    onToggleHidden={toggleHidden}
                   />
                 ) : leftTab === "modules" ? (
                   <ModulesView root={project.path} activePath={activePath} onOpen={(p, line) => void jumpTo(p, line ?? 1, 1)} />
@@ -2132,6 +2184,8 @@ export default function App() {
                 />
               ) : rightPanel === "skills" ? (
                 <SkillsPanel root={project.path} />
+              ) : rightPanel === "mcp" ? (
+                <McpPanel root={project.path} />
               ) : (
                 <ChatPanel
                   file={active && !active.loading ? { path: active.path, name: active.name, content: active.content } : null}
@@ -2184,6 +2238,18 @@ export default function App() {
                   <path d="M94.972,55.756H30.479C13.646,55.756,0,69.407,0,86.243v342.279c0,16.837,13.646,30.47,30.479,30.47h64.493c16.833,0,30.479-13.634,30.479-30.47V86.243C125.452,69.407,111.805,55.756,94.972,55.756z M98.569,234.237H26.882v-17.922h71.687V234.237z M98.569,180.471H26.882v-35.843h71.687V180.471z" />
                   <path d="M238.346,55.756h-64.493c-16.833,0-30.479,13.651-30.479,30.487v342.279c0,16.837,13.646,30.47,30.479,30.47h64.493c16.833,0,30.479-13.634,30.479-30.47V86.243C268.825,69.407,255.178,55.756,238.346,55.756z M241.942,234.237h-71.687v-17.922h71.687V234.237z M241.942,180.471h-71.687v-35.843h71.687V180.471z" />
                   <path d="M510.409,398.305L401.562,73.799c-5.352-15.961-22.63-24.554-38.587-19.208l-61.146,20.512c-15.961,5.356-24.559,22.63-19.204,38.592L391.472,438.2c5.356,15.962,22.63,24.555,38.587,19.208l61.146-20.512C507.166,431.541,515.763,414.267,510.409,398.305z M326.677,160.493l67.967-22.796l11.398,33.988l-67.968,22.796L326.677,160.493z M355.173,245.455l-5.701-16.994l67.968-22.796l5.696,16.994L355.173,245.455z" />
+                </svg>
+              ),
+            },
+            {
+              id: "mcp",
+              title: "MCP Servers (⌘⌥6)",
+              active: rightPanel === "mcp",
+              onClick: () => setRightPanel((p) => (p === "mcp" ? null : "mcp")),
+              icon: (
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="12" rx="2" />
+                  <path d="M8 20h8M12 16v4M8 9l2.5 2.5L8 14M13 14h3" />
                 </svg>
               ),
             },
