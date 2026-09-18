@@ -8,10 +8,6 @@ first-class AI: an agent that works your tickets in the repo, an assistant that
 understands your code, and tooling that plugs into the Claude CLI, MCP servers,
 and your own agent skills.
 
-Built with [Tauri 2](https://tauri.app/) (Rust) + React + TypeScript, and the
-[Eclipse JDT language server](https://github.com/eclipse-jdtls/eclipse.jdt.ls)
-for real Java intelligence.
-
 ---
 
 ## Purpose
@@ -60,49 +56,59 @@ multi-module (reactor) projects.
   the filesystem (so it works even without a login-shell `PATH`), with a picker
   under Settings → Tools → Maven.
 
-### Editors & diagrams
-- **YAML** and **Gradle** highlighting + validation/completion.
-- **Markdown** live preview with local images, GFM tables, and **mermaid /
-  PlantUML diagrams**.
-- **PlantUML split editor** — open a `.puml` file to edit the source on the left
-  with a live-rendered diagram on the right (fit-to-width, zoom, pan).
-- **Configurable code styles** (Google / AOSP / imported Eclipse profiles) and
-  actions-on-save.
-
 ### Git
 - Full Git panel: **history, working-tree changes, staging, and a branch graph**.
 - **Merge-conflict tooling** — conflicts surface in the Changes tab with a 3-way
   merge tool plus quick *Accept theirs / Accept mine*.
 - **Remote sync** — Fetch, Pull (rebase), and Push with ahead/behind indicators.
 
-### Project & workspace
-- File tree with **cut / copy / paste, drag-to-move, undo**, multi-select, and a
-  toggle to reveal normally-hidden build/tooling files.
-- **External-change watcher** — files created or changed outside the IDE appear
-  automatically.
-- **Problems panel** (virtualized for large diagnostic counts) and a
-  language-server **indexing indicator** in the status bar.
-- Auto-detected source/resource roots; Maven/Gradle **build panel**.
+### Diagrams
+- **PlantUML split editor** — open a `.puml` file to edit the source on the left
+  with a live-rendered diagram on the right (fit-to-width, zoom, pan).
+- **Markdown** live preview with **mermaid** and **PlantUML** diagrams.
 
-### Settings & keymap
-- IntelliJ-style **settings tree** with search.
+### Customization
 - **Configurable keymap** — Default / IntelliJ IDEA / NetBeans templates, custom
   per-action overrides, and JSON import/export.
 
 ## Getting started
+
+### Download
+
+The easiest way to get Reevik Java ADE is to grab the latest release. Signed,
+notarized, universal (Intel + Apple Silicon) DMGs are published here:
+
+**https://github.com/reevik/Java-IDE/releases**
+
+Download the `.dmg`, open it, and drag **Reevik Java ADE** to your Applications
+folder — no Gatekeeper warning, no `xattr` workaround.
+
+To use the AI agent features, install the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
+(optional) and make sure a **JDK** is available (e.g. `brew install openjdk@21`).
+
+### Build from source
+
+Reevik Java ADE is built with [Tauri 2](https://tauri.app/) (a Rust backend) and
+a React + TypeScript frontend, and uses the
+[Eclipse JDT language server](https://github.com/eclipse-jdtls/eclipse.jdt.ls)
+for Java intelligence.
 
 Requirements: **macOS**, [Node.js](https://nodejs.org/) 20+, the
 [Rust toolchain](https://rustup.rs/), and a **JDK** (e.g. `brew install openjdk@21`).
 The Claude CLI is optional but required for the AI agent features.
 
 ```bash
-# Install dependencies
+# 1. Clone the repository
+git clone https://github.com/reevik/Java-IDE.git
+cd Java-IDE
+
+# 2. Install frontend dependencies
 npm install
 
-# Run the app in development
+# 3. Run the app in development (hot-reloads the UI, rebuilds the Rust backend)
 npm run tauri dev
 
-# Build a release bundle (.app + .dmg)
+# 4. Build a release bundle (.app + .dmg) into src-tauri/target/release/bundle
 npm run tauri build
 ```
 
