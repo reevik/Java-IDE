@@ -278,7 +278,7 @@ function GeneralTab() {
     <div>
       <Section title="About">
         <div className="flex items-center gap-3 text-[12.5px]">
-          <div className="grid h-10 w-10 place-items-center rounded-lg bg-[var(--accent-soft)] text-[18px]">🦀</div>
+          <img src="/app-icon.png" alt="Reevik Java ADE" className="h-10 w-10 shrink-0 rounded-lg" />
           <div>
             <div className="font-semibold text-[var(--text-primary)]">Reevik Java ADE</div>
             <div className="text-[11.5px] text-[var(--text-tertiary)]">Version {version ?? "…"}</div>
